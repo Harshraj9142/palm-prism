@@ -1,12 +1,15 @@
 /**
- * Runtime-built visuals for Palm Prism: board, emitter, crystals, blockers,
- * mirrors, the beam and the sky. Everything is procedural (no downloads) and
- * cheap: unlit additive glow instead of post-processing, so Quest stays at
- * frame rate.
+ * Palm Prism visuals: a night observatory. A slate-and-brass astrolabe board
+ * on a brass stem, warm lamplight beams with drifting dust, amber and
+ * aquamarine crystals, glass-and-brass mirrors, and a real-feeling night sky.
+ *
+ * Everything is procedural (no downloads) and cheap: unlit glow sprites
+ * instead of post-processing, so Quest stays at frame rate.
  */
 import {
   AdditiveBlending,
   BoxGeometry,
+  BufferAttribute,
   BufferGeometry,
   CanvasTexture,
   CircleGeometry,
@@ -40,45 +43,63 @@ import { MAX_BOUNCES } from './beam.js';
 import { CRYSTAL_RADIUS, MIRROR_RADIUS, type CrystalKind } from './levels.js';
 
 export const COLORS = {
-  beamCore: new Color('#fffbe8'),
-  beamGlow: new Color('#ffcf5a'),
-  gold: new Color('#ffc23d'),
-  goldDim: new Color('#6b4a12'),
-  blue: new Color('#5fd4ff'),
-  blueDim: new Color('#173a52'),
-  palm: new Color('#8fe9ff'),
-  frozen: new Color('#ffd27a'),
-  rune: new Color('#8a6cff'),
+  beamCore: new Color('#fff6dc'),
+  beamGlow: new Color('#ffb84d'),
+  /** Amber "stay" crystals. */
+  gold: new Color('#f4b23e'),
+  goldDim: new Color('#4a3210'),
+  /** Aquamarine "pulse" crystals. */
+  blue: new Color('#52d6c3'),
+  blueDim: new Color('#0f3330'),
+  /** Silvered glass on a palm. */
+  palm: new Color('#dfe9f2'),
+  /** Brass: frozen mirrors, rims, the board's inlay. */
+  frozen: new Color('#d8a74e'),
+  rune: new Color('#a07d3c'),
+  brass: new Color('#c49a4f'),
 };
 
 const UP = new Vector3(0, 1, 0);
 const FORWARD_Z = new Vector3(0, 0, 1);
 
-let glowTexture: CanvasTexture | null = null;
-
-/** Soft round glow used by halos, sparkles and earned stars. */
-export function getGlowTexture(): CanvasTexture {
-  if (glowTexture) return glowTexture;
-  const size = 128;
+function makeCanvas(size: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const g = ctx.createRadialGradient(
-    size / 2,
-    size / 2,
-    0,
-    size / 2,
-    size / 2,
-    size / 2,
-  );
+  return [canvas, canvas.getContext('2d')!];
+}
+
+function canvasTexture(canvas: HTMLCanvasElement): CanvasTexture {
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
+/** Seeded random so the sky and dust look identical every visit. */
+export function seeded(seed: number) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+let glowTexture: CanvasTexture | null = null;
+
+/** Soft round glow used by halos, sparkles, stars and dust. */
+export function getGlowTexture(): CanvasTexture {
+  if (glowTexture) return glowTexture;
+  const size = 128;
+  const [canvas, ctx] = makeCanvas(size);
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
   g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.2, 'rgba(255,255,255,0.6)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0.12)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
-  glowTexture = new CanvasTexture(canvas);
-  glowTexture.colorSpace = SRGBColorSpace;
+  glowTexture = canvasTexture(canvas);
   return glowTexture;
 }
 
@@ -98,169 +119,202 @@ export function createGlowSprite(color: Color, size: number, opacity = 1) {
 
 let ringTexture: CanvasTexture | null = null;
 
-/** Thin glowing ring used by bursts and shockwaves. */
+/** Thin soft ring used by bursts and shockwaves. */
 function getRingTexture(): CanvasTexture {
   if (ringTexture) return ringTexture;
   const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  ctx.strokeStyle = 'rgba(255,255,255,1)';
-  ctx.shadowColor = 'rgba(255,255,255,1)';
-  ctx.shadowBlur = 10;
-  ctx.lineWidth = 5;
+  const [canvas, ctx] = makeCanvas(size);
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.shadowColor = 'rgba(255,255,255,0.8)';
+  ctx.shadowBlur = 8;
+  ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.arc(size / 2, size / 2, size / 2 - 12, 0, Math.PI * 2);
   ctx.stroke();
-  ringTexture = new CanvasTexture(canvas);
-  ringTexture.colorSpace = SRGBColorSpace;
+  ringTexture = canvasTexture(canvas);
   return ringTexture;
 }
 
-interface Burst {
-  ring: Sprite;
-  glow: Sprite;
-  t: number;
-  life: number;
-  size: number;
-}
+// ------------------------------------------------------------------ Board
 
-/**
- * Pool of short light bursts (an expanding ring plus a flash) for crystals
- * lighting up and levels clearing. Fixed size, so nothing is allocated while
- * playing.
- */
-export class BurstPool {
-  readonly group = new Group();
-  private readonly bursts: Burst[] = [];
-  private next = 0;
+/** Slate face of the astrolabe: etched rings, degree ticks, hour numerals. */
+function drawBoardFace(): CanvasTexture {
+  const size = 1024;
+  const [canvas, ctx] = makeCanvas(size);
+  const c = size / 2;
+  const g = ctx.createRadialGradient(c, c * 0.9, 0, c, c, c);
+  g.addColorStop(0, '#2a2d33');
+  g.addColorStop(1, '#16181d');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
 
-  constructor(count = 16) {
-    this.group.name = 'Bursts';
-    for (let i = 0; i < count; i++) {
-      const ring = new Sprite(
-        new SpriteMaterial({
-          map: getRingTexture(),
-          transparent: true,
-          blending: AdditiveBlending,
-          depthWrite: false,
-        }),
-      );
-      const glow = createGlowSprite(COLORS.gold, 0.1, 1);
-      ring.visible = false;
-      glow.visible = false;
-      this.group.add(ring, glow);
-      this.bursts.push({ ring, glow, t: 1, life: 1, size: 0.1 });
-    }
+  // Fine stone grain.
+  const rand = seeded(11);
+  for (let i = 0; i < 9000; i++) {
+    const a = rand() * 0.06;
+    ctx.fillStyle = rand() < 0.5 ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a * 1.5})`;
+    ctx.fillRect(rand() * size, rand() * size, 1.5, 1.5);
   }
 
-  spawn(x: number, y: number, z: number, color: Color, size = 0.16, life = 0.7) {
-    const b = this.bursts[this.next];
-    this.next = (this.next + 1) % this.bursts.length;
-    b.t = 0;
-    b.life = life;
-    b.size = size;
-    b.ring.position.set(x, y, z);
-    b.glow.position.set(x, y, z);
-    b.ring.material.color.copy(color);
-    b.glow.material.color.copy(color);
-    b.ring.visible = true;
-    b.glow.visible = true;
+  const etch = (r: number, width: number, alpha: number) => {
+    ctx.strokeStyle = `rgba(214,178,112,${alpha})`;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.arc(c, c, r, 0, Math.PI * 2);
+    ctx.stroke();
+  };
+  etch(c * 0.96, 3, 0.55);
+  etch(c * 0.9, 1.5, 0.35);
+  etch(c * 0.62, 1.2, 0.22);
+  etch(c * 0.3, 1.2, 0.2);
+
+  // Degree ticks between the two outer rings.
+  for (let i = 0; i < 360; i += 2) {
+    const a = (i * Math.PI) / 180;
+    const long = i % 30 === 0;
+    const mid = i % 10 === 0;
+    const r1 = c * 0.96;
+    const r0 = r1 - (long ? 30 : mid ? 20 : 11);
+    ctx.strokeStyle = `rgba(214,178,112,${long ? 0.6 : mid ? 0.4 : 0.25})`;
+    ctx.lineWidth = long ? 2.4 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0);
+    ctx.lineTo(c + Math.cos(a) * r1, c + Math.sin(a) * r1);
+    ctx.stroke();
   }
 
-  update(dt: number): void {
-    for (const b of this.bursts) {
-      if (!b.ring.visible) continue;
-      b.t += dt;
-      const k = b.t / b.life;
-      if (k >= 1) {
-        b.ring.visible = false;
-        b.glow.visible = false;
-        continue;
-      }
-      const ease = 1 - (1 - k) * (1 - k) * (1 - k);
-      b.ring.scale.setScalar(b.size * (0.15 + 0.85 * ease));
-      b.ring.material.opacity = 1 - k;
-      b.glow.scale.setScalar(b.size * 0.7 * (1 - 0.5 * k));
-      b.glow.material.opacity = (1 - k) * (1 - k);
-    }
+  // Hour numerals, like the rim of an astrolabe.
+  const numerals = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
+  ctx.fillStyle = 'rgba(214,178,112,0.5)';
+  ctx.font = '600 26px Georgia, "Noto Serif", serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  numerals.forEach((n, i) => {
+    const a = -Math.PI / 2 + (i / 12) * Math.PI * 2;
+    const r = c * 0.84;
+    ctx.save();
+    ctx.translate(c + Math.cos(a) * r, c + Math.sin(a) * r);
+    ctx.rotate(a + Math.PI / 2);
+    ctx.fillText(n, 0, 0);
+    ctx.restore();
+  });
+
+  // A faint compass rose at the centre.
+  ctx.strokeStyle = 'rgba(214,178,112,0.16)';
+  ctx.lineWidth = 1.2;
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    const r = i % 4 === 0 ? c * 0.6 : i % 2 === 0 ? c * 0.42 : c * 0.3;
+    ctx.beginPath();
+    ctx.moveTo(c, c);
+    ctx.lineTo(c + Math.cos(a) * r, c + Math.sin(a) * r);
+    ctx.stroke();
   }
+  return canvasTexture(canvas);
 }
 
 export interface Board {
   group: Group;
-  /** Rune ring material, flashed gold when a level clears. */
+  /** Inlay ring material, warmed to bright gold when a level clears. */
   rune: MeshBasicMaterial;
+  /** Stretch the brass stem so it reaches the floor from `heightAboveFloor`. */
+  setStemHeight(heightAboveFloor: number): void;
 }
 
-/** Floating stone board. Its top surface is at local y = 0. */
+/** Slate-and-brass astrolabe on a stem. Its top surface is at local y = 0. */
 export function createBoard(): Board {
   const group = new Group();
   group.name = 'PrismBoard';
 
-  const stone = new Mesh(
-    new CylinderGeometry(0.25, 0.27, 0.035, 64),
-    new MeshStandardMaterial({
-      color: '#1d1b2e',
-      roughness: 0.55,
-      metalness: 0.2,
-    }),
-  );
-  stone.position.y = -0.0175;
-  group.add(stone);
+  const brass = new MeshStandardMaterial({
+    color: COLORS.brass,
+    metalness: 0.85,
+    roughness: 0.32,
+  });
+  const darkBrass = new MeshStandardMaterial({
+    color: '#6e5426',
+    metalness: 0.8,
+    roughness: 0.45,
+  });
+  const slateSide = new MeshStandardMaterial({ color: '#1a1c21', roughness: 0.7 });
+  const face = new MeshStandardMaterial({
+    map: drawBoardFace(),
+    roughness: 0.65,
+    metalness: 0.05,
+  });
 
-  const runeMaterial = new MeshBasicMaterial({ color: COLORS.rune.clone() });
-  const rune = new Mesh(new TorusGeometry(0.24, 0.0035, 8, 96), runeMaterial);
-  rune.rotation.x = Math.PI / 2;
-  rune.position.y = 0.001;
-  group.add(rune);
+  const slab = new Mesh(new CylinderGeometry(0.25, 0.25, 0.026, 96), [
+    slateSide,
+    face,
+    slateSide,
+  ]);
+  slab.position.y = -0.013;
+  group.add(slab);
 
-  const inner = new Mesh(
-    new RingGeometry(0.11, 0.113, 64),
-    new MeshBasicMaterial({
-      color: COLORS.rune,
-      transparent: true,
-      opacity: 0.45,
-    }),
-  );
-  inner.rotation.x = -Math.PI / 2;
-  inner.position.y = 0.0012;
-  group.add(inner);
+  const rim = new Mesh(new TorusGeometry(0.252, 0.0065, 14, 160), brass);
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = -0.002;
+  group.add(rim);
 
-  const underGlow = createGlowSprite(COLORS.rune, 0.9, 0.35);
-  underGlow.position.y = -0.06;
-  group.add(underGlow);
-  return { group, rune: runeMaterial };
+  const runeMaterial = new MeshBasicMaterial({
+    color: COLORS.rune.clone(),
+    transparent: true,
+    opacity: 0.9,
+  });
+  const inlay = new Mesh(new RingGeometry(0.236, 0.239, 128), runeMaterial);
+  inlay.rotation.x = -Math.PI / 2;
+  inlay.position.y = 0.0008;
+  group.add(inlay);
+
+  // Underside collar, stem and foot.
+  const collar = new Mesh(new CylinderGeometry(0.06, 0.03, 0.04, 48), darkBrass);
+  collar.position.y = -0.046;
+  group.add(collar);
+  const stem = new Mesh(new CylinderGeometry(0.011, 0.014, 1, 24), darkBrass);
+  group.add(stem);
+  const foot = new Mesh(new CylinderGeometry(0.1, 0.13, 0.025, 64), darkBrass);
+  group.add(foot);
+
+  const setStemHeight = (h: number) => {
+    const top = 0.066;
+    const length = Math.max(0.05, h - top);
+    stem.scale.y = length;
+    stem.position.y = -top - length / 2;
+    foot.position.y = -h + 0.0125;
+  };
+  setStemHeight(1);
+  return { group, rune: runeMaterial, setStemHeight };
 }
 
-/** Light source. Its lens sits at the group origin and fires along +Y. */
+/** Brass lamp. Its lens sits at the group origin and fires along +Y. */
 export function createEmitter(): Group {
   const group = new Group();
-  const base = new Mesh(
-    new CylinderGeometry(0.016, 0.024, 0.022, 6),
-    new MeshStandardMaterial({
-      color: '#b8862b',
-      metalness: 0.8,
-      roughness: 0.3,
-      emissive: COLORS.gold,
-      emissiveIntensity: 0.15,
-    }),
+  const body = new Mesh(
+    new CylinderGeometry(0.013, 0.02, 0.026, 24),
+    new MeshStandardMaterial({ color: COLORS.brass, metalness: 0.85, roughness: 0.3 }),
   );
-  base.position.y = -0.012;
-  group.add(base);
+  body.position.y = -0.014;
+  group.add(body);
+  const collar = new Mesh(
+    new TorusGeometry(0.0125, 0.0025, 8, 32),
+    new MeshStandardMaterial({ color: '#7a5c26', metalness: 0.8, roughness: 0.4 }),
+  );
+  collar.rotation.x = Math.PI / 2;
+  group.add(collar);
   const lens = new Mesh(
-    new SphereGeometry(0.009, 16, 12),
+    new SphereGeometry(0.0085, 20, 14),
     new MeshBasicMaterial({ color: COLORS.beamCore }),
   );
   group.add(lens);
-  group.add(createGlowSprite(COLORS.beamGlow, 0.08, 0.9));
+  group.add(createGlowSprite(COLORS.beamGlow, 0.07, 0.7));
   return group;
 }
 
 export function orientAlong(object: Group | Mesh, dir: Vector3): void {
   object.quaternion.setFromUnitVectors(UP, dir);
 }
+
+// ---------------------------------------------------------------- Pieces
 
 export interface CrystalVisual {
   group: Group;
@@ -270,8 +324,8 @@ export interface CrystalVisual {
 }
 
 /**
- * Crystal. The shape follows the note so colour is never the only cue
- * (accessibility): gold stay-crystals and blue pulse-crystals also differ.
+ * Cut-glass crystal. The shape follows the note and teal crystals wear a
+ * brass ring, so colour is never the only cue (accessibility).
  */
 export function createCrystal(kind: CrystalKind, note: number): CrystalVisual {
   const r = CRYSTAL_RADIUS;
@@ -287,8 +341,8 @@ export function createCrystal(kind: CrystalKind, note: number): CrystalVisual {
     color: kind === 'stay' ? COLORS.goldDim : COLORS.blueDim,
     emissive: color,
     emissiveIntensity: 0.25,
-    roughness: 0.15,
-    metalness: 0.1,
+    roughness: 0.08,
+    metalness: 0.2,
     flatShading: true,
   });
   const mesh = new Mesh(geometry, material);
@@ -296,13 +350,13 @@ export function createCrystal(kind: CrystalKind, note: number): CrystalVisual {
   group.add(mesh);
   if (kind === 'pulse') {
     const ring = new Mesh(
-      new TorusGeometry(r * 1.45, 0.0016, 6, 40),
-      new MeshBasicMaterial({ color, transparent: true, opacity: 0.55 }),
+      new TorusGeometry(r * 1.5, 0.0013, 6, 48),
+      new MeshStandardMaterial({ color: COLORS.brass, metalness: 0.8, roughness: 0.3 }),
     );
     ring.rotation.x = Math.PI / 2;
     group.add(ring);
   }
-  const halo = createGlowSprite(color, 0.12, 0.15);
+  const halo = createGlowSprite(color, 0.12, 0.12);
   group.add(halo);
   return { group, mesh, material, halo };
 }
@@ -316,25 +370,19 @@ export function createBlocker(
   const sz = max[2] - min[2];
   const geometry = new BoxGeometry(sx, sy, sz);
   const group = new Group();
-  const body = new Mesh(
-    geometry,
-    new MeshStandardMaterial({
-      color: '#0d0c16',
-      roughness: 0.35,
-      metalness: 0.4,
-    }),
+  group.add(
+    new Mesh(
+      geometry,
+      new MeshStandardMaterial({ color: '#121418', roughness: 0.85, metalness: 0.1 }),
+    ),
   );
-  group.add(body);
-  const edges = new LineSegments(
-    new EdgesGeometry(geometry),
-    new LineBasicMaterial({ color: COLORS.rune }),
+  group.add(
+    new LineSegments(
+      new EdgesGeometry(geometry),
+      new LineBasicMaterial({ color: COLORS.brass, transparent: true, opacity: 0.55 }),
+    ),
   );
-  group.add(edges);
-  group.position.set(
-    (min[0] + max[0]) / 2,
-    (min[1] + max[1]) / 2,
-    (min[2] + max[2]) / 2,
-  );
+  group.position.set((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
   return group;
 }
 
@@ -344,32 +392,25 @@ export interface MirrorVisual {
   ring: MeshBasicMaterial;
 }
 
-/** Hexagonal light shield shown on a palm or as a frozen mirror. */
-export function createMirrorVisual(color: Color): MirrorVisual {
+/** Hexagonal pane of silvered glass in a thin brass frame. */
+export function createMirrorVisual(glass: Color, frame: Color = COLORS.brass): MirrorVisual {
   const group = new Group();
   const fill = new MeshBasicMaterial({
-    color,
+    color: glass,
     transparent: true,
-    opacity: 0.14,
+    opacity: 0.16,
     side: DoubleSide,
-    blending: AdditiveBlending,
     depthWrite: false,
   });
-  const disc = new Mesh(new CircleGeometry(MIRROR_RADIUS, 6), fill);
-  group.add(disc);
+  group.add(new Mesh(new CircleGeometry(MIRROR_RADIUS, 6), fill));
   const ring = new MeshBasicMaterial({
-    color,
+    color: frame,
     transparent: true,
-    opacity: 0.6,
+    opacity: 0.85,
     side: DoubleSide,
-    blending: AdditiveBlending,
     depthWrite: false,
   });
-  const edge = new Mesh(
-    new RingGeometry(MIRROR_RADIUS * 0.88, MIRROR_RADIUS, 6),
-    ring,
-  );
-  group.add(edge);
+  group.add(new Mesh(new RingGeometry(MIRROR_RADIUS * 0.92, MIRROR_RADIUS, 6), ring));
   group.visible = false;
   return { group, fill, ring };
 }
@@ -392,76 +433,62 @@ export function placeMirror(
   visual.group.quaternion.copy(mirrorQuat);
 }
 
-/** Pool of glowing beam segments plus sparkles at each bounce. */
+// ------------------------------------------------------------------ Beam
+
+/** Pool of glowing beam segments plus a soft flare at each bounce. */
 export class BeamRenderer {
   readonly group = new Group();
   private readonly cores: Mesh[] = [];
   private readonly glows: Mesh[] = [];
-  private readonly sparkles: Sprite[] = [];
+  private readonly flares: Sprite[] = [];
   private readonly a = new Vector3();
   private readonly b = new Vector3();
   private readonly dir = new Vector3();
 
   constructor() {
     this.group.name = 'Beam';
-    const geometry = new CylinderGeometry(1, 1, 1, 8, 1, true);
+    const geometry = new CylinderGeometry(1, 1, 1, 10, 1, true);
     const coreMat = new MeshBasicMaterial({ color: COLORS.beamCore });
     const glowMat = new MeshBasicMaterial({
       color: COLORS.beamGlow,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.22,
       blending: AdditiveBlending,
       depthWrite: false,
     });
-    const segments = MAX_BOUNCES + 1;
-    for (let i = 0; i < segments; i++) {
+    for (let i = 0; i < MAX_BOUNCES + 1; i++) {
       const core = new Mesh(geometry, coreMat);
       const glow = new Mesh(geometry, glowMat);
-      core.visible = false;
-      glow.visible = false;
-      core.frustumCulled = false;
-      glow.frustumCulled = false;
+      core.visible = glow.visible = false;
+      core.frustumCulled = glow.frustumCulled = false;
       this.cores.push(core);
       this.glows.push(glow);
       this.group.add(core, glow);
-      const sparkle = createGlowSprite(COLORS.beamGlow, 0.06, 0.9);
-      sparkle.visible = false;
-      this.sparkles.push(sparkle);
-      this.group.add(sparkle);
+      const flare = createGlowSprite(COLORS.beamGlow, 0.05, 0.8);
+      flare.visible = false;
+      this.flares.push(flare);
+      this.group.add(flare);
     }
   }
 
-  /** points: xyz triples (origin then segment ends); mirrorAt marks bounces. */
-  update(
-    points: Float32Array,
-    count: number,
-    mirrorAt: Int16Array,
-    time: number,
-  ): void {
-    const flicker = 1 + Math.sin(time * 31) * 0.08;
+  update(points: Float32Array, count: number, mirrorAt: Int16Array, time: number): void {
+    const shimmer = 1 + Math.sin(time * 23) * 0.05;
     for (let i = 0; i < this.cores.length; i++) {
-      const visible = i < count - 1;
       const core = this.cores[i];
       const glow = this.glows[i];
-      const sparkle = this.sparkles[i];
-      core.visible = visible;
-      glow.visible = visible;
+      const flare = this.flares[i];
+      const visible = i < count - 1;
+      core.visible = glow.visible = visible;
       if (!visible) {
-        sparkle.visible = false;
+        flare.visible = false;
         continue;
       }
       this.a.set(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]);
-      this.b.set(
-        points[(i + 1) * 3],
-        points[(i + 1) * 3 + 1],
-        points[(i + 1) * 3 + 2],
-      );
+      this.b.set(points[i * 3 + 3], points[i * 3 + 4], points[i * 3 + 5]);
       this.dir.subVectors(this.b, this.a);
       const length = this.dir.length();
       if (length < 1e-5) {
-        core.visible = false;
-        glow.visible = false;
-        sparkle.visible = false;
+        core.visible = glow.visible = flare.visible = false;
         continue;
       }
       this.dir.divideScalar(length);
@@ -469,128 +496,311 @@ export class BeamRenderer {
       glow.position.copy(core.position);
       core.quaternion.setFromUnitVectors(UP, this.dir);
       glow.quaternion.copy(core.quaternion);
-      core.scale.set(0.0022, length, 0.0022);
-      glow.scale.set(0.008 * flicker, length, 0.008 * flicker);
-
+      core.scale.set(0.0018, length, 0.0018);
+      glow.scale.set(0.0075 * shimmer, length, 0.0075 * shimmer);
       const bounced = mirrorAt[i + 1] >= 0;
-      sparkle.visible = bounced;
+      flare.visible = bounced;
       if (bounced) {
-        sparkle.position.copy(this.b);
-        sparkle.scale.setScalar(0.05 * flicker);
+        flare.position.copy(this.b);
+        flare.scale.setScalar(0.045 * shimmer);
       }
     }
   }
 }
 
-/** Seeded random so the sky looks identical every visit. */
-function seeded(seed: number) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
+/** Dust motes drifting along the beam, like light through a dark room. */
+export class DustMotes {
+  readonly points: Points;
+  private readonly positions: Float32Array;
+  private readonly phase: Float32Array;
+  private readonly offsets: Float32Array;
+  private readonly cumulative = new Float32Array(MAX_BOUNCES + 2);
+  private readonly count: number;
+
+  constructor(count = 160) {
+    this.count = count;
+    this.positions = new Float32Array(count * 3);
+    this.phase = new Float32Array(count);
+    this.offsets = new Float32Array(count * 3);
+    const rand = seeded(5);
+    for (let i = 0; i < count; i++) {
+      this.phase[i] = rand();
+      this.offsets[i * 3] = (rand() - 0.5) * 0.012;
+      this.offsets[i * 3 + 1] = (rand() - 0.5) * 0.012;
+      this.offsets[i * 3 + 2] = (rand() - 0.5) * 0.012;
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(this.positions, 3));
+    this.points = new Points(
+      geometry,
+      new PointsMaterial({
+        color: COLORS.beamGlow,
+        map: getGlowTexture(),
+        size: 0.0045,
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0.75,
+        blending: AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    this.points.frustumCulled = false;
+    this.points.name = 'DustMotes';
+  }
+
+  update(points: Float32Array, count: number, time: number): void {
+    const segs = count - 1;
+    if (segs < 1) {
+      this.points.visible = false;
+      return;
+    }
+    this.points.visible = true;
+    let total = 0;
+    this.cumulative[0] = 0;
+    for (let s = 0; s < segs; s++) {
+      const dx = points[s * 3 + 3] - points[s * 3];
+      const dy = points[s * 3 + 4] - points[s * 3 + 1];
+      const dz = points[s * 3 + 5] - points[s * 3 + 2];
+      total += Math.sqrt(dx * dx + dy * dy + dz * dz);
+      this.cumulative[s + 1] = total;
+    }
+    for (let i = 0; i < this.count; i++) {
+      const d = ((this.phase[i] + time * 0.035) % 1) * total;
+      let s = 0;
+      while (s < segs - 1 && this.cumulative[s + 1] < d) s++;
+      const segLen = this.cumulative[s + 1] - this.cumulative[s] || 1;
+      const t = (d - this.cumulative[s]) / segLen;
+      const wobble = Math.sin(time * 0.9 + i) * 0.6;
+      const p = i * 3;
+      const o = s * 3;
+      this.positions[p] = points[o] + (points[o + 3] - points[o]) * t + this.offsets[p] * wobble;
+      this.positions[p + 1] =
+        points[o + 1] + (points[o + 4] - points[o + 1]) * t + this.offsets[p + 1];
+      this.positions[p + 2] =
+        points[o + 2] + (points[o + 5] - points[o + 2]) * t + this.offsets[p + 2] * wobble;
+    }
+    (this.points.geometry.getAttribute('position') as BufferAttribute).needsUpdate = true;
+  }
 }
+
+interface Burst {
+  ring: Sprite;
+  glow: Sprite;
+  t: number;
+  life: number;
+  size: number;
+}
+
+/** Pool of short light bursts for crystals lighting and levels clearing. */
+export class BurstPool {
+  readonly group = new Group();
+  private readonly bursts: Burst[] = [];
+  private next = 0;
+
+  constructor(count = 16) {
+    this.group.name = 'Bursts';
+    for (let i = 0; i < count; i++) {
+      const ring = new Sprite(
+        new SpriteMaterial({
+          map: getRingTexture(),
+          transparent: true,
+          blending: AdditiveBlending,
+          depthWrite: false,
+        }),
+      );
+      const glow = createGlowSprite(COLORS.gold, 0.1, 1);
+      ring.visible = glow.visible = false;
+      this.group.add(ring, glow);
+      this.bursts.push({ ring, glow, t: 1, life: 1, size: 0.1 });
+    }
+  }
+
+  spawn(x: number, y: number, z: number, color: Color, size = 0.16, life = 0.7) {
+    const b = this.bursts[this.next];
+    this.next = (this.next + 1) % this.bursts.length;
+    b.t = 0;
+    b.life = life;
+    b.size = size;
+    b.ring.position.set(x, y, z);
+    b.glow.position.set(x, y, z);
+    b.ring.material.color.copy(color);
+    b.glow.material.color.copy(color);
+    b.ring.visible = b.glow.visible = true;
+  }
+
+  update(dt: number): void {
+    for (const b of this.bursts) {
+      if (!b.ring.visible) continue;
+      b.t += dt;
+      const k = b.t / b.life;
+      if (k >= 1) {
+        b.ring.visible = b.glow.visible = false;
+        continue;
+      }
+      const ease = 1 - (1 - k) * (1 - k) * (1 - k);
+      b.ring.scale.setScalar(b.size * (0.15 + 0.85 * ease));
+      b.ring.material.opacity = 0.9 * (1 - k);
+      b.glow.scale.setScalar(b.size * 0.6 * (1 - 0.5 * k));
+      b.glow.material.opacity = (1 - k) * (1 - k);
+    }
+  }
+}
+
+// ------------------------------------------------------------ Sky, floor
 
 export interface Sky {
   group: Group;
   setEarned(count: number): void;
 }
 
+const STAR_TINTS = ['#fff4e0', '#ffffff', '#dfe8ff', '#ffe2b8', '#cfdcff'];
+
+function starField(
+  rand: () => number,
+  count: number,
+  size: number,
+  opacity: number,
+  pick: () => [number, number, number],
+): Points {
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const c = new Color();
+  for (let i = 0; i < count; i++) {
+    positions.push(...pick());
+    c.set(STAR_TINTS[Math.floor(rand() * STAR_TINTS.length)]);
+    const b = 0.45 + rand() * 0.55;
+    colors.push(c.r * b, c.g * b, c.b * b);
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
+  return new Points(
+    geometry,
+    new PointsMaterial({
+      size,
+      map: getGlowTexture(),
+      vertexColors: true,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+      blending: AdditiveBlending,
+    }),
+  );
+}
+
 /**
- * Background stars plus "earned" stars: one bright star per star the player
- * has earned, so progress stays visible between sessions.
+ * Night sky: scattered stars, a soft Milky Way band, and the player's own
+ * constellation. Every star earned adds one brass star, joined to the last.
  */
 export function createSky(): Sky {
   const group = new Group();
   group.name = 'Sky';
   const rand = seeded(42);
-  const positions: number[] = [];
-  for (let i = 0; i < 900; i++) {
-    const u = rand() * 2 - 1;
+  const R = 45;
+  const onSphere = (): [number, number, number] => {
+    const u = rand() * 0.95 + 0.05;
     const theta = rand() * Math.PI * 2;
-    const r = 40;
     const s = Math.sqrt(1 - u * u);
-    const y = Math.abs(u) * r * 0.9 + 1;
-    positions.push(Math.cos(theta) * s * r, y, Math.sin(theta) * s * r);
-  }
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
-  const points = new Points(
-    geometry,
-    new PointsMaterial({
-      color: '#c9c3ff',
-      size: 0.12,
-      sizeAttenuation: true,
-      transparent: true,
-      opacity: 0.7,
-      depthWrite: false,
-    }),
-  );
-  group.add(points);
+    return [Math.cos(theta) * s * R, u * R, Math.sin(theta) * s * R];
+  };
+  group.add(starField(rand, 700, 0.35, 0.9, onSphere));
+  group.add(starField(rand, 90, 0.75, 1, onSphere));
 
-  // Earned stars form a ring constellation in front of the player.
-  const earned: Sprite[] = [];
-  const earnedRand = seeded(7);
+  // Milky Way: a dense, dim band along a tilted great circle.
+  const tilt = 0.55;
+  const band = (): [number, number, number] => {
+    const a = rand() * Math.PI * 2;
+    const spread = (rand() + rand() + rand() - 1.5) * 0.16;
+    const x = Math.cos(a);
+    const z = Math.sin(a);
+    let y = spread;
+    const yy = y * Math.cos(tilt) + z * Math.sin(tilt);
+    const zz = -y * Math.sin(tilt) + z * Math.cos(tilt);
+    y = Math.abs(yy) + 0.04;
+    const l = Math.hypot(x, y, zz);
+    return [(x / l) * R, (y / l) * R, (zz / l) * R];
+  };
+  group.add(starField(rand, 1400, 0.28, 0.55, band));
+
+  // The player's constellation, rising in front of them.
   const EARNED_MAX = 60;
+  const earnedRand = seeded(7);
+  const earned: Sprite[] = [];
+  const linePositions = new Float32Array(EARNED_MAX * 6);
+  let px = 0;
+  let py = 9;
+  let pz = -26;
   for (let i = 0; i < EARNED_MAX; i++) {
-    // Spiral outward so early stars sit right in front of the player.
-    const angle = -Math.PI / 2 + i * 0.62;
-    const radius = 14 + earnedRand() * 4;
+    if (i > 0) {
+      px += (earnedRand() - 0.5) * 7;
+      py += (earnedRand() - 0.35) * 3.2;
+      pz += (earnedRand() - 0.5) * 3;
+      if (py > 22 || py < 5) py = 7 + earnedRand() * 10;
+      if (Math.abs(px) > 22) px *= 0.5;
+    }
     const sprite = createGlowSprite(
-      i % 3 === 0 ? COLORS.blue : COLORS.gold,
-      1.1 + earnedRand() * 0.6,
-      0.95,
+      i % 4 === 3 ? COLORS.blue : COLORS.frozen,
+      1.3 + earnedRand() * 0.9,
+      1,
     );
-    sprite.position.set(
-      Math.cos(angle) * radius,
-      5 + earnedRand() * 6,
-      Math.sin(angle) * radius,
-    );
+    sprite.position.set(px, py, pz);
     sprite.visible = false;
     earned.push(sprite);
     group.add(sprite);
+    if (i > 0) {
+      const prev = earned[i - 1].position;
+      linePositions.set([prev.x, prev.y, prev.z, px, py, pz], (i - 1) * 6);
+    }
   }
+  const lineGeometry = new BufferGeometry();
+  lineGeometry.setAttribute('position', new BufferAttribute(linePositions, 3));
+  lineGeometry.setDrawRange(0, 0);
+  const lines = new LineSegments(
+    lineGeometry,
+    new LineBasicMaterial({ color: COLORS.frozen, transparent: true, opacity: 0.35 }),
+  );
+  group.add(lines);
 
   return {
     group,
     setEarned(count: number) {
-      for (let i = 0; i < earned.length; i++) earned[i].visible = i < count;
+      const n = Math.min(count, EARNED_MAX);
+      for (let i = 0; i < EARNED_MAX; i++) earned[i].visible = i < n;
+      lineGeometry.setDrawRange(0, Math.max(0, n - 1) * 2);
     },
   };
 }
 
-/** Dark floor with faint rings, so the player feels grounded while seated. */
+/** Dark floor engraved like a planisphere, so a seated player feels grounded. */
 export function createFloor(): Mesh {
-  const size = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const g = ctx.createRadialGradient(
-    size / 2,
-    size / 2,
-    0,
-    size / 2,
-    size / 2,
-    size / 2,
-  );
-  g.addColorStop(0, '#2a2347');
-  g.addColorStop(0.5, '#120f22');
-  g.addColorStop(1, '#05040b');
+  const size = 1024;
+  const [canvas, ctx] = makeCanvas(size);
+  const c = size / 2;
+  const g = ctx.createRadialGradient(c, c, 0, c, c, c);
+  g.addColorStop(0, '#151925');
+  g.addColorStop(0.45, '#0b0e17');
+  g.addColorStop(1, '#04050a');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
-  ctx.strokeStyle = 'rgba(138,108,255,0.22)';
-  ctx.lineWidth = 2;
-  for (let i = 1; i <= 6; i++) {
+  ctx.strokeStyle = 'rgba(196,154,79,0.12)';
+  ctx.lineWidth = 1.5;
+  for (let i = 1; i <= 8; i++) {
     ctx.beginPath();
-    ctx.arc(size / 2, size / 2, (i / 6) * (size / 2) * 0.95, 0, Math.PI * 2);
+    ctx.arc(c, c, (i / 8) * c * 0.94, 0, Math.PI * 2);
     ctx.stroke();
   }
-  const texture = new CanvasTexture(canvas);
-  texture.colorSpace = SRGBColorSpace;
+  ctx.strokeStyle = 'rgba(196,154,79,0.06)';
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(c + Math.cos(a) * c * 0.12, c + Math.sin(a) * c * 0.12);
+    ctx.lineTo(c + Math.cos(a) * c * 0.94, c + Math.sin(a) * c * 0.94);
+    ctx.stroke();
+  }
   const floor = new Mesh(
-    new CircleGeometry(8, 64),
-    new MeshBasicMaterial({ map: texture }),
+    new CircleGeometry(9, 96),
+    new MeshBasicMaterial({ map: canvasTexture(canvas) }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.name = 'Floor';

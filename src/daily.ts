@@ -182,7 +182,7 @@ function tryGenerate(rand: () => number, key: string): LevelDef | null {
   const level: LevelDef = {
     id: `daily-${key}`,
     title: 'Daily Prism',
-    tip: 'A new puzzle every day. Three blue notes, one freeze.',
+    tip: 'Three teal notes, one freeze. The same puzzle for everyone today.',
     emitter: { pos: round3(emitterPos), dir: round3(emitterDir) },
     crystals: crystals.map((c, i) => ({
       pos: round3(c),
@@ -257,7 +257,7 @@ export function createDailyLevel(key = todayKey()): LevelDef {
   return {
     id: `daily-${key}`,
     title: 'Daily Prism',
-    tip: 'A new puzzle every day. Three blue notes, one freeze.',
+    tip: 'Three teal notes, one freeze. The same puzzle for everyone today.',
     emitter: { pos: [0.16, 0.015, 0.1], dir: [0, 1, 0] },
     crystals: [
       { pos: [0, 0.3, 0.1], note: 1, kind: 'pulse' },

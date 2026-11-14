@@ -17,15 +17,14 @@ import {
   Matrix4,
   MeshBasicMaterial,
   Object3D,
+  Pressed,
   Quaternion,
+  RayInteractable,
   Vector3,
   VisibilityState,
   type Entity,
-  type UIKit,
-  type UIKitMLAsset,
 } from '@iwsdk/core';
 import { prismAudio } from './audio.js';
-import { createDailyLevel, todayKey } from './daily.js';
 import {
   BeamTrace,
   mirrorNormalFor,
@@ -34,6 +33,8 @@ import {
   type MirrorDisc,
   type SphereTarget,
 } from './beam.js';
+import { createDailyLevel, todayKey } from './daily.js';
+import { Hud, TitleCard, type HudAction, type HudState } from './hud.js';
 import {
   CHARGE_SECONDS,
   CRYSTAL_AIM_ASSIST,
@@ -44,6 +45,7 @@ import {
   type CrystalDef,
   type LevelDef,
 } from './levels.js';
+import { PrismButton } from './prism-button.js';
 import {
   BeamRenderer,
   BurstPool,
@@ -55,8 +57,10 @@ import {
   createFloor,
   createMirrorVisual,
   createSky,
+  DustMotes,
   orientAlong,
   placeMirror,
+  type Board,
   type CrystalVisual,
   type MirrorVisual,
   type Sky,
@@ -73,6 +77,7 @@ type Side = 'left' | 'right';
 type GameState = 'intro' | 'play' | 'clear' | 'finale';
 
 const SIDES: Side[] = ['left', 'right'];
+const HUD_ACTIONS: HudAction[] = ['restart', 'daily', 'next', 'recenter'];
 const HISTORY = 12;
 /** Frames to look back when freezing, so the pinch motion itself is ignored. */
 const FREEZE_LOOKBACK = 7;
@@ -80,13 +85,15 @@ const MAX_FROZEN = 4;
 /** Seated layout: board this far ahead of and below the eyes. */
 const BOARD_DISTANCE = 0.5;
 const BOARD_DROP = 0.42;
-const DESKTOP_BOARD_POSITION = new Vector3(0, 1.0, -0.5);
+const DESKTOP_BOARD_POSITION = new Vector3(0.12, 1.0, -0.5);
 // High enough that hand rays from the play area pass under it, so pinches
 // over the board freeze mirrors instead of hovering the panel.
 const HUD_LOCAL = new Vector3(0, 0.64, -0.38);
+const TITLE_LOCAL_Y = 0.34;
 const HIDDEN_Y = -100;
 const INTRO_SECONDS = 0.6;
 const AUTO_ADVANCE_SECONDS = 3.5;
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 
 interface PalmState {
   side: Side;
@@ -120,16 +127,7 @@ interface CrystalState {
 }
 
 function makeMirror(): MirrorDisc {
-  return {
-    cx: 0,
-    cy: 0,
-    cz: 0,
-    nx: 0,
-    ny: 1,
-    nz: 0,
-    radius: MIRROR_RADIUS,
-    active: false,
-  };
+  return { cx: 0, cy: 0, cz: 0, nx: 0, ny: 1, nz: 0, radius: MIRROR_RADIUS, active: false };
 }
 
 function disposeTree(root: Object3D): void {
@@ -145,18 +143,32 @@ function disposeTree(root: Object3D): void {
   });
 }
 
-export class PrismGameSystem extends createSystem({}) {
+function prettyDate(key: string): string {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+export class PrismGameSystem extends createSystem({
+  buttons: { required: [PrismButton] },
+  pressed: { required: [PrismButton, Pressed] },
+  hovered: { required: [PrismButton, Hovered] },
+}) {
+  private boardParts!: Board;
   private board!: Group;
   private rune!: MeshBasicMaterial;
-  private bursts!: BurstPool;
-  private clearFlash = 0;
-  private isDaily = false;
   private levelGroup!: Group;
   private emitter!: Group;
   private beam!: BeamRenderer;
+  private dust!: DustMotes;
+  private bursts!: BurstPool;
   private sky!: Sky;
   private hint!: MirrorVisual;
-  private trace = new BeamTrace(16, 2 + MAX_FROZEN);
+  private showcase = makeMirror();
+  private showcaseVisual!: MirrorVisual;
+  private trace = new BeamTrace(16, 3 + MAX_FROZEN);
 
   private palms!: Record<Side, PalmState>;
   private frozen: MirrorDisc[] = [];
@@ -165,6 +177,7 @@ export class PrismGameSystem extends createSystem({}) {
 
   private level!: LevelDef;
   private levelIndex = 0;
+  private isDaily = false;
   private crystals: CrystalState[] = [];
   private crystalTargets: SphereTarget[] = [];
   private boxes: BoxObstacle[] = [];
@@ -187,31 +200,24 @@ export class PrismGameSystem extends createSystem({}) {
     maxZ: 20,
   };
   private emitterDir = new Vector3();
-  private hintNormal: [number, number, number] = [0, 1, 0];
   private anyLit = false;
 
   private state: GameState = 'intro';
   private stateTime = 0;
   private holdTime = 0;
   private freezesUsed = 0;
-  private tipFlash = 0;
+  private clearFlash = 0;
+  private lastStars = 0;
+  private tipOverride: string | null = null;
+  private tipTimer = 0;
   private recenterIn = -1;
+  private immersive = false;
   private progress!: Progress;
 
-  private hudObject?: Object3D;
-  private hudEntity?: Entity;
-  private hud: {
-    levelLabel?: UIKit.Text;
-    title?: UIKit.Text;
-    tip?: UIKit.Text;
-    freeze?: UIKit.Text;
-    streak?: UIKit.Text;
-    stars: { setProperties(p: Record<string, unknown>): void }[];
-    next?: { setProperties(p: Record<string, unknown>): void };
-    nextLabel?: UIKit.Text;
-    chip?: { setProperties(p: Record<string, unknown>): void };
-    chipText?: UIKit.Text;
-  } = { stars: [] };
+  private hud!: Hud;
+  private hudEntity!: Entity;
+  private titleCard!: TitleCard;
+  private hoverCount = 0;
 
   // Scratch objects, allocated once.
   private boardInv = new Matrix4();
@@ -230,17 +236,16 @@ export class PrismGameSystem extends createSystem({}) {
   init(): void {
     this.progress = loadProgress();
 
-    const floor = createFloor();
-    this.world.createTransformEntity(floor, { persistent: true });
+    this.world.createTransformEntity(createFloor(), { persistent: true });
     this.sky = createSky();
     this.world.createTransformEntity(this.sky.group, { persistent: true });
     this.sky.setEarned(totalStars(this.progress));
 
-    const board = createBoard();
-    this.board = board.group;
-    this.rune = board.rune;
+    this.boardParts = createBoard();
+    this.board = this.boardParts.group;
+    this.rune = this.boardParts.rune;
     this.world.createTransformEntity(this.board, { persistent: true });
-    this.board.position.copy(DESKTOP_BOARD_POSITION);
+    this.placeBoardForBrowser();
 
     this.levelGroup = new Group();
     this.levelGroup.name = 'Level';
@@ -249,45 +254,50 @@ export class PrismGameSystem extends createSystem({}) {
     this.board.add(this.emitter);
     this.beam = new BeamRenderer();
     this.board.add(this.beam.group);
+    this.dust = new DustMotes();
+    this.board.add(this.dust.points);
     this.bursts = new BurstPool();
     this.board.add(this.bursts.group);
 
-    this.palms = {
-      left: this.makePalm('left'),
-      right: this.makePalm('right'),
-    };
+    this.palms = { left: this.makePalm('left'), right: this.makePalm('right') };
     for (let i = 0; i < MAX_FROZEN; i++) {
-      const m = makeMirror();
-      this.frozen.push(m);
-      const v = createMirrorVisual(COLORS.frozen);
-      v.fill.opacity = 0.22;
+      this.frozen.push(makeMirror());
+      const v = createMirrorVisual(COLORS.frozen, COLORS.frozen);
+      v.fill.opacity = 0.3;
       this.frozenVisuals.push(v);
       this.board.add(v.group);
     }
+    this.showcaseVisual = createMirrorVisual(COLORS.palm);
+    this.board.add(this.showcaseVisual.group);
     this.mirrors = [
       this.palms.left.mirror,
       this.palms.right.mirror,
       ...this.frozen,
+      this.showcase,
     ];
     this.hint = createMirrorVisual(COLORS.palm);
     this.board.add(this.hint.group);
+
+    this.titleCard = new TitleCard();
+    this.titleCard.mesh.position.set(0, TITLE_LOCAL_Y, -0.04);
+    this.titleCard.baseY = TITLE_LOCAL_Y;
+    this.board.add(this.titleCard.mesh);
 
     this.setupHud();
     this.loadLevel(Math.min(this.progress.unlocked, LEVELS.length - 1));
 
     this.cleanupFuncs.push(
       this.world.visibilityState.subscribe((visibility) => {
-        const immersive = visibility !== VisibilityState.NonImmersive;
-        if (immersive) {
+        this.immersive = visibility !== VisibilityState.NonImmersive;
+        if (this.immersive) {
           prismAudio.ensure();
           prismAudio.setDrone(true);
           this.recenterIn = 0.4;
         } else {
           prismAudio.setDrone(false);
-          this.board.position.copy(DESKTOP_BOARD_POSITION);
-          this.board.rotation.set(0, 0, 0);
+          this.placeBoardForBrowser();
         }
-        this.placeHud(immersive);
+        this.placeHud();
       }),
     );
 
@@ -331,119 +341,120 @@ export class PrismGameSystem extends createSystem({}) {
     };
   }
 
+  private placeBoardForBrowser(): void {
+    this.board.position.copy(DESKTOP_BOARD_POSITION);
+    this.board.rotation.set(0, -0.12, 0);
+    this.boardParts.setStemHeight(DESKTOP_BOARD_POSITION.y);
+  }
+
   // ---------------------------------------------------------------- HUD
 
   private setupHud(): void {
-    const panel = this.world.getSceneObject<UIKitMLAsset>('hud-panel');
-    this.hudObject = panel;
-    this.hudEntity = this.world.getSceneEntity('hud-panel');
-    if (!panel) return;
-    const text = (id: string) =>
-      panel.getElementById<UIKit.Text>(id) ?? undefined;
-    this.hud.levelLabel = text('level-label');
-    this.hud.title = text('level-title');
-    this.hud.tip = text('tip-text');
-    this.hud.freeze = text('freeze-text');
-    this.hud.streak = text('streak-text');
-    this.hud.nextLabel = text('next-label');
-    this.hud.chipText = text('status-text');
-    this.hud.chip = panel.getElementById('status-chip') ?? undefined;
-    for (const id of ['star-1', 'star-2', 'star-3']) {
-      const star = panel.getElementById(id);
-      if (star) this.hud.stars.push(star);
+    this.hud = new Hud();
+    this.hudEntity = this.world.createTransformEntity(this.hud.root, { persistent: true });
+    for (const action of HUD_ACTIONS) {
+      const mesh = this.hud.buttons[action].mesh;
+      const home = mesh.position.clone();
+      const entity = this.world.createTransformEntity(mesh, {
+        parent: this.hudEntity,
+        persistent: true,
+      });
+      mesh.position.copy(home);
+      entity.addComponent(PrismButton, { action });
+      entity.addComponent(RayInteractable);
     }
-    const next = panel.getElementById('next-button') ?? undefined;
-    const reset = panel.getElementById('reset-button') ?? undefined;
-    const recenter = panel.getElementById('recenter-button') ?? undefined;
-    const daily = panel.getElementById('daily-button') ?? undefined;
-    this.hud.next = next;
 
-    const onNext = () => {
-      prismAudio.ensure();
-      if (this.isDaily) this.loadLevel(this.progress.unlocked);
-      else if (this.state === 'finale') this.loadDaily();
-      else if (this.state === 'clear') this.advance();
-    };
-    const onReset = () => {
-      prismAudio.ensure();
-      this.restart();
-    };
-    const onDaily = () => {
-      prismAudio.ensure();
-      this.loadDaily();
-    };
-    const onRecenter = () => {
-      prismAudio.ensure();
-      this.recenter();
-    };
-    next?.addEventListener('click', onNext);
-    reset?.addEventListener('click', onReset);
-    recenter?.addEventListener('click', onRecenter);
-    daily?.addEventListener('click', onDaily);
-    this.cleanupFuncs.push(() => {
-      daily?.removeEventListener('click', onDaily);
-      next?.removeEventListener('click', onNext);
-      reset?.removeEventListener('click', onReset);
-      recenter?.removeEventListener('click', onRecenter);
-    });
+    const actionOf = (entity: Entity) =>
+      (entity.getValue(PrismButton, 'action') ?? '') as HudAction;
+    this.cleanupFuncs.push(
+      this.queries.pressed.subscribe('qualify', (entity) => {
+        prismAudio.ensure();
+        this.onButton(actionOf(entity));
+      }),
+      this.queries.hovered.subscribe('qualify', (entity) => {
+        this.hoverCount++;
+        this.hud.setHovered(actionOf(entity), true);
+      }),
+      this.queries.hovered.subscribe('disqualify', (entity) => {
+        this.hoverCount = Math.max(0, this.hoverCount - 1);
+        this.hud.setHovered(actionOf(entity), false);
+      }),
+    );
+    this.placeHud();
   }
 
-  private placeHud(immersive: boolean): void {
-    if (!this.hudObject) return;
-    if (!immersive) {
-      this.hudObject.position.set(0, HIDDEN_Y, 0);
+  private onButton(action: HudAction): void {
+    if (import.meta.env.DEV) console.info(`[PalmPrism] button ${action}`);
+    switch (action) {
+      case 'restart':
+        this.restart();
+        break;
+      case 'daily':
+        this.loadDaily();
+        break;
+      case 'recenter':
+        this.recenter();
+        break;
+      case 'next':
+        if (this.isDaily) this.loadLevel(this.progress.unlocked);
+        else if (this.state === 'finale') this.loadDaily();
+        else if (this.state === 'clear') this.advance();
+        break;
+    }
+  }
+
+  private setNextVisible(visible: boolean): void {
+    this.hud.buttons.next.mesh.visible = visible;
+  }
+
+  private placeHud(): void {
+    const root = this.hud.root;
+    if (!this.immersive) {
+      root.position.set(0, HIDDEN_Y, 0);
+      root.visible = false;
       return;
     }
+    root.visible = true;
     this.board.updateWorldMatrix(true, false);
     this.vA.copy(HUD_LOCAL);
     this.board.localToWorld(this.vA);
-    this.hudObject.position.copy(this.vA);
+    root.position.copy(this.vA);
     this.euler.set(-0.22, this.board.rotation.y, 0, 'YXZ');
     this.quat.setFromEuler(this.euler);
-    this.hudObject.quaternion.copy(this.quat);
+    root.quaternion.copy(this.quat);
   }
 
-  private refreshHud(): void {
+  private hudState(): HudState {
     const level = this.level;
-    this.hud.levelLabel?.setProperties({
-      text: this.isDaily
-        ? `DAILY PRISM  ${todayKey()}`
-        : `LEVEL ${this.levelIndex + 1} / ${LEVELS.length}`,
-    });
-    this.hud.chip?.setProperties({ display: 'none' });
-    this.hud.title?.setProperties({ text: level.title });
-    this.hud.tip?.setProperties({ text: level.tip });
-    this.refreshFreezeText();
-    const streak = currentStreak(this.progress);
-    this.hud.streak?.setProperties({
-      text: streak > 0 ? `Streak ${streak} day${streak === 1 ? '' : 's'}` : '',
-    });
-    this.setStars(this.progress.stars[level.id] ?? 0);
-    this.hud.next?.setProperties({ display: 'none' });
+    const solved = this.state === 'clear' || this.state === 'finale';
+    return {
+      label: this.isDaily
+        ? `Daily Prism · ${prettyDate(todayKey())}`
+        : `Level ${this.levelIndex + 1} of ${LEVELS.length}`,
+      title: level.title,
+      tip: this.tipOverride ?? (solved ? this.solvedLine() : level.tip),
+      stars: solved ? this.lastStars : (this.progress.stars[level.id] ?? 0),
+      freezesTotal: level.freezes,
+      freezesLeft: level.freezes - this.freezesUsed,
+      streak: currentStreak(this.progress),
+      solved,
+    };
   }
 
-  private refreshFreezeText(): void {
-    const level = this.level;
-    this.hud.freeze?.setProperties({
-      text:
-        level.freezes > 0
-          ? `Freezes ${level.freezes - this.freezesUsed} left`
-          : 'Palms only',
-    });
+  private solvedLine(): string {
+    if (this.isDaily) return 'Solved. A new puzzle waits tomorrow.';
+    if (this.state === 'finale') return "Every level solved. Try today's Daily Prism.";
+    return this.lastStars === 3 ? 'Perfect. On to the next.' : 'Solved. Fewer freezes earn more stars.';
   }
 
-  private setStars(count: number): void {
-    this.hud.stars.forEach((star, i) =>
-      star.setProperties({
-        color: i < count ? '#ffc23d' : '#3d3f4a',
-        fill: i < count ? '#ffc23d' : 'none',
-      }),
-    );
+  private redrawHud(): void {
+    this.hud.draw(this.hudState());
   }
 
   private flashTip(text: string): void {
-    this.hud.tip?.setProperties({ text });
-    this.tipFlash = 2.2;
+    this.tipOverride = text;
+    this.tipTimer = 2.4;
+    this.redrawHud();
   }
 
   // ------------------------------------------------------------- Levels
@@ -474,21 +485,21 @@ export class PrismGameSystem extends createSystem({}) {
       disposeTree(child);
     }
 
-    this.crystals = level.crystals.map((def) => {
-      const visual = createCrystal(def.kind, def.note);
-      visual.group.position.set(def.pos[0], def.pos[1], def.pos[2]);
+    this.crystals = level.crystals.map((c) => {
+      const visual = createCrystal(c.kind, c.note);
+      visual.group.position.set(c.pos[0], c.pos[1], c.pos[2]);
       visual.group.scale.setScalar(0.001);
       this.levelGroup.add(visual.group);
       return {
-        def,
+        def: c,
         target: {
-          x: def.pos[0],
-          y: def.pos[1],
-          z: def.pos[2],
+          x: c.pos[0],
+          y: c.pos[1],
+          z: c.pos[2],
           radius: CRYSTAL_RADIUS + CRYSTAL_AIM_ASSIST,
         },
         visual,
-        baseY: def.pos[1],
+        baseY: c.pos[1],
         charge: 0,
         lit: false,
         glow: 0,
@@ -515,25 +526,35 @@ export class PrismGameSystem extends createSystem({}) {
     this.emitter.position.set(e.pos[0], e.pos[1], e.pos[2]);
     this.emitterDir.set(e.dir[0], e.dir[1], e.dir[2]).normalize();
     orientAlong(this.emitter, this.emitterDir);
+    const inDir: [number, number, number] = [
+      this.emitterDir.x,
+      this.emitterDir.y,
+      this.emitterDir.z,
+    ];
 
     if (level.hint) {
       const c = level.hint.center;
       const t = level.hint.toward;
-      this.hintNormal = mirrorNormalFor(
-        [this.emitterDir.x, this.emitterDir.y, this.emitterDir.z],
-        [t[0] - c[0], t[1] - c[1], t[2] - c[2]],
-      );
-      placeMirror(
-        this.hint,
-        c[0],
-        c[1],
-        c[2],
-        this.hintNormal[0],
-        this.hintNormal[1],
-        this.hintNormal[2],
-      );
+      const n = mirrorNormalFor(inDir, [t[0] - c[0], t[1] - c[1], t[2] - c[2]]);
+      placeMirror(this.hint, c[0], c[1], c[2], n[0], n[1], n[2]);
     }
     this.hint.group.visible = false;
+
+    // Browser attract mode: a glass pane on the first bounce of the known
+    // solution, so the landing view shows light bending into a crystal.
+    const path = level.solutions[0];
+    const c0 = path[0];
+    const c1 = path[1];
+    const sn = mirrorNormalFor(inDir, [c1[0] - c0[0], c1[1] - c0[1], c1[2] - c0[2]]);
+    Object.assign(this.showcase, {
+      cx: c0[0],
+      cy: c0[1],
+      cz: c0[2],
+      nx: sn[0],
+      ny: sn[1],
+      nz: sn[2],
+    });
+    placeMirror(this.showcaseVisual, c0[0], c0[1], c0[2], sn[0], sn[1], sn[2]);
 
     for (let i = 0; i < MAX_FROZEN; i++) {
       this.frozen[i].active = false;
@@ -542,9 +563,15 @@ export class PrismGameSystem extends createSystem({}) {
     this.freezesUsed = 0;
     this.holdTime = 0;
     this.anyLit = false;
-    this.tipFlash = 0;
+    this.tipOverride = null;
+    this.tipTimer = 0;
     this.setState('intro');
-    this.refreshHud();
+    this.setNextVisible(false);
+    this.titleCard.show(
+      this.isDaily ? `Daily Prism · ${prettyDate(todayKey())}` : `Level ${ROMAN[this.levelIndex]}`,
+      level.title,
+    );
+    this.redrawHud();
   }
 
   private advance(): void {
@@ -560,6 +587,7 @@ export class PrismGameSystem extends createSystem({}) {
     const level = this.level;
     const stars =
       this.freezesUsed <= level.par ? 3 : this.freezesUsed <= level.par + 1 ? 2 : 1;
+    this.lastStars = stars;
     this.progress = recordClear(
       this.progress,
       level.id,
@@ -567,10 +595,11 @@ export class PrismGameSystem extends createSystem({}) {
       stars,
       LEVELS.length,
     );
-    if (import.meta.env.DEV) {
-      console.info(`[PalmPrism] clear ${level.id} stars=${stars}`);
-    }
-    // Celebrate: every crystal bursts, a shockwave rolls over the board.
+    if (import.meta.env.DEV) console.info(`[PalmPrism] clear ${level.id} stars=${stars}`);
+    this.sky.setEarned(totalStars(this.progress));
+    prismAudio.celebrate(level.crystals.map((c) => c.note));
+
+    // Every crystal flares, a ring of light rolls across the board.
     for (const c of this.crystals) {
       this.bursts.spawn(
         c.def.pos[0],
@@ -581,40 +610,44 @@ export class PrismGameSystem extends createSystem({}) {
         0.9,
       );
     }
-    this.bursts.spawn(0, 0.02, 0, COLORS.gold, 0.9, 1.3);
+    this.bursts.spawn(0, 0.02, 0, COLORS.frozen, 0.9, 1.3);
     this.clearFlash = 1;
-    this.hud.chip?.setProperties({ display: 'flex' });
-    this.hud.chipText?.setProperties({
-      text: this.isDaily ? 'DAILY SOLVED' : 'LEVEL CLEAR',
-    });
-    this.sky.setEarned(totalStars(this.progress));
-    prismAudio.celebrate(level.crystals.map((c) => c.note));
-    this.setStars(stars);
-    const streak = currentStreak(this.progress);
-    this.hud.streak?.setProperties({
-      text: `Streak ${streak} day${streak === 1 ? '' : 's'}`,
-    });
+
     const last = this.levelIndex === LEVELS.length - 1;
-    if (this.isDaily) {
-      this.setState('finale');
-      this.hud.tip?.setProperties({
-        text: 'Daily Prism solved! A new one waits tomorrow.',
-      });
-      this.hud.nextLabel?.setProperties({ text: 'Levels' });
-    } else if (last) {
-      this.setState('finale');
-      this.hud.tip?.setProperties({
-        text: "Every level cleared! Try today's Daily Prism.",
-      });
-      this.hud.nextLabel?.setProperties({ text: 'Daily' });
-    } else {
-      this.setState('clear');
-      this.hud.tip?.setProperties({
-        text: stars === 3 ? 'Perfect! Three stars.' : 'Level clear!',
-      });
-      this.hud.nextLabel?.setProperties({ text: 'Next' });
-    }
-    this.hud.next?.setProperties({ display: 'flex' });
+    this.setState(this.isDaily || last ? 'finale' : 'clear');
+    this.hud.setButtonLabel(
+      'next',
+      this.isDaily ? 'Levels' : last ? 'Daily' : 'Next',
+    );
+    this.setNextVisible(true);
+    this.titleCard.show(
+      `${stars} of 3 stars`,
+      this.isDaily ? 'Solved' : stars === 3 ? 'Perfect' : 'Solved',
+      2.4,
+    );
+    this.redrawHud();
+  }
+
+  // ------------------------------------------------------------ Recenter
+
+  private recenter(): void {
+    const head = this.player.head;
+    head.updateWorldMatrix(true, false);
+    head.getWorldPosition(this.vA);
+    head.getWorldQuaternion(this.quat);
+    this.vB.set(0, 0, -1).applyQuaternion(this.quat);
+    this.vB.y = 0;
+    if (this.vB.lengthSq() < 1e-6) this.vB.set(0, 0, -1);
+    this.vB.normalize();
+    const y = Math.max(0.5, this.vA.y - BOARD_DROP);
+    this.board.position.set(
+      this.vA.x + this.vB.x * BOARD_DISTANCE,
+      y,
+      this.vA.z + this.vB.z * BOARD_DISTANCE,
+    );
+    this.board.rotation.set(0, Math.atan2(-this.vB.x, -this.vB.z), 0);
+    this.boardParts.setStemHeight(y);
+    this.placeHud();
   }
 
   /** Dev only: dump the beam path, mirrors and crystal hits to the console. */
@@ -646,26 +679,6 @@ export class PrismGameSystem extends createSystem({}) {
     );
   }
 
-  // ------------------------------------------------------------ Recenter
-
-  private recenter(): void {
-    const head = this.player.head;
-    head.updateWorldMatrix(true, false);
-    head.getWorldPosition(this.vA);
-    head.getWorldQuaternion(this.quat);
-    this.vB.set(0, 0, -1).applyQuaternion(this.quat);
-    this.vB.y = 0;
-    if (this.vB.lengthSq() < 1e-6) this.vB.set(0, 0, -1);
-    this.vB.normalize();
-    this.board.position.set(
-      this.vA.x + this.vB.x * BOARD_DISTANCE,
-      Math.max(0.5, this.vA.y - BOARD_DROP),
-      this.vA.z + this.vB.z * BOARD_DISTANCE,
-    );
-    this.board.rotation.set(0, Math.atan2(-this.vB.x, -this.vB.z), 0);
-    this.placeHud(true);
-  }
-
   // --------------------------------------------------------------- Palms
 
   private resolveJoints(p: PalmState, spaces: XRJointSpace[]): void {
@@ -689,12 +702,7 @@ export class PrismGameSystem extends createSystem({}) {
     }
   }
 
-  private jointWorld(
-    gripWorld: Matrix4,
-    transforms: Float32Array,
-    index: number,
-    out: Vector3,
-  ): void {
+  private jointWorld(gripWorld: Matrix4, transforms: Float32Array, index: number, out: Vector3) {
     this.jointMat.fromArray(transforms, index * 16).premultiply(gripWorld);
     out.setFromMatrixPosition(this.jointMat);
   }
@@ -704,15 +712,8 @@ export class PrismGameSystem extends createSystem({}) {
     let ok = false;
     const hand = this.input.visualAdapters.hand[p.side];
     const transforms = hand.jointTransforms;
-    if (
-      this.input.isPrimary('hand', p.side) &&
-      hand.connected &&
-      transforms &&
-      hand.gripSpace
-    ) {
-      if (p.jointSource !== hand.jointSpaces) {
-        this.resolveJoints(p, hand.jointSpaces);
-      }
+    if (this.input.isPrimary('hand', p.side) && hand.connected && transforms && hand.gripSpace) {
+      if (p.jointSource !== hand.jointSpaces) this.resolveJoints(p, hand.jointSpaces);
       if (p.wrist >= 0 && p.indexProx >= 0 && p.middleProx >= 0 && p.pinkyProx >= 0) {
         const grip = hand.gripSpace;
         grip.updateWorldMatrix(true, false);
@@ -758,8 +759,8 @@ export class PrismGameSystem extends createSystem({}) {
     return true;
   }
 
-  private updatePalm(p: PalmState, delta: number, immersive: boolean): void {
-    p.valid = immersive && this.readPalm(p, delta);
+  private updatePalm(p: PalmState, delta: number): void {
+    p.valid = this.immersive && this.readPalm(p, delta);
     p.mirror.active = p.valid;
     if (!p.valid) {
       p.visual.group.visible = false;
@@ -795,7 +796,7 @@ export class PrismGameSystem extends createSystem({}) {
 
   private tryFreeze(p: PalmState): void {
     if (this.state !== 'play' || !p.valid) return;
-    if (this.hudEntity?.hasComponent(Hovered)) {
+    if (this.hoverCount > 0) {
       if (import.meta.env.DEV) console.info('[PalmPrism] freeze skipped: hud');
       return;
     }
@@ -810,7 +811,7 @@ export class PrismGameSystem extends createSystem({}) {
       return;
     }
     if (this.freezesUsed >= level.freezes) {
-      this.flashTip('No freezes left. Press Reset to try again.');
+      this.flashTip('No freezes left. Restart to try again.');
       prismAudio.deny();
       return;
     }
@@ -831,7 +832,8 @@ export class PrismGameSystem extends createSystem({}) {
     placeMirror(v, f.cx, f.cy, f.cz, f.nx, f.ny, f.nz);
     v.group.visible = true;
     this.freezesUsed++;
-    this.refreshFreezeText();
+    this.bursts.spawn(f.cx, f.cy, f.cz, COLORS.frozen, 0.12, 0.5);
+    this.redrawHud();
     prismAudio.freeze();
     if (import.meta.env.DEV) console.info(`[PalmPrism] freeze ${p.side}`);
   }
@@ -840,8 +842,6 @@ export class PrismGameSystem extends createSystem({}) {
 
   update(delta: number, time: number): void {
     const dt = Math.min(delta, 0.1);
-    const immersive =
-      this.world.visibilityState.peek() !== VisibilityState.NonImmersive;
 
     if (this.recenterIn >= 0) {
       this.recenterIn -= dt;
@@ -852,9 +852,9 @@ export class PrismGameSystem extends createSystem({}) {
     this.boardInv.copy(this.board.matrixWorld).invert();
     this.floorBox.maxY = -this.board.position.y;
 
-    for (const side of SIDES) this.updatePalm(this.palms[side], dt, immersive);
+    for (const side of SIDES) this.updatePalm(this.palms[side], dt);
 
-    if (immersive) {
+    if (this.immersive) {
       for (const side of SIDES) {
         if (this.input.xr.getSelectState(side).start) {
           prismAudio.ensure();
@@ -862,6 +862,10 @@ export class PrismGameSystem extends createSystem({}) {
         }
       }
     }
+
+    // Attract mode in the browser: show light bending into the first crystal.
+    this.showcase.active = !this.immersive && this.state !== 'intro';
+    this.showcaseVisual.group.visible = this.showcase.active;
 
     const e = this.level.emitter;
     traceBeam(
@@ -876,33 +880,31 @@ export class PrismGameSystem extends createSystem({}) {
       this.boxes,
       this.trace,
     );
-    this.beam.update(
-      this.trace.points,
-      this.trace.pointCount,
-      this.trace.mirrorAtPoint,
-      time,
-    );
+    this.beam.update(this.trace.points, this.trace.pointCount, this.trace.mirrorAtPoint, time);
+    this.dust.update(this.trace.points, this.trace.pointCount, time);
 
     for (let i = 0; i < 2; i++) {
       const p = i === 0 ? this.palms.left : this.palms.right;
       const hit = this.trace.mirrorHit[i] === 1;
-      p.visual.fill.opacity = hit ? 0.3 : 0.12;
-      p.visual.ring.opacity = hit ? 0.95 : 0.5;
+      p.visual.fill.opacity = hit ? 0.3 : 0.14;
+      p.visual.ring.opacity = hit ? 1 : 0.7;
     }
 
     this.stateTime += dt;
     this.updateCrystals(dt, time);
+    this.updateHint(time);
     this.bursts.update(dt);
+    this.titleCard.update(dt);
     if (this.clearFlash > 0) {
       this.clearFlash = Math.max(0, this.clearFlash - dt * 0.6);
-      this.rune.color.copy(COLORS.rune).lerp(COLORS.gold, this.clearFlash);
+      this.rune.color.copy(COLORS.rune).lerp(COLORS.beamGlow, this.clearFlash);
     }
-    this.updateHint(time);
 
-    if (this.tipFlash > 0) {
-      this.tipFlash -= dt;
-      if (this.tipFlash <= 0 && (this.state === 'play' || this.state === 'intro')) {
-        this.hud.tip?.setProperties({ text: this.level.tip });
+    if (this.tipTimer > 0) {
+      this.tipTimer -= dt;
+      if (this.tipTimer <= 0) {
+        this.tipOverride = null;
+        this.redrawHud();
       }
     }
 
@@ -918,7 +920,7 @@ export class PrismGameSystem extends createSystem({}) {
   }
 
   private updateCrystals(dt: number, time: number): void {
-    const playing = this.state === 'play';
+    const playing = this.state === 'play' && this.immersive;
     let allStay = true;
     let allPulse = true;
     let hasPulse = false;
@@ -927,7 +929,8 @@ export class PrismGameSystem extends createSystem({}) {
 
     for (let i = 0; i < this.crystals.length; i++) {
       const c = this.crystals[i];
-      const hit = playing && this.trace.crystalHit[i] === 1;
+      const touched = this.trace.crystalHit[i] === 1;
+      const hit = playing && touched;
       let target: number;
       if (c.def.kind === 'stay') {
         if (!c.lit) {
@@ -956,13 +959,15 @@ export class PrismGameSystem extends createSystem({}) {
         if (!glowing) allPulse = false;
         target = glowing ? 2.8 : 0.2;
       }
+      // In the browser preview, crystals the beam touches simply glow.
+      if (!this.immersive && touched) target = 2.2;
       c.intensity += (target - c.intensity) * Math.min(1, dt * 10);
       c.visual.material.emissiveIntensity = c.intensity;
-      c.visual.halo.material.opacity = Math.min(1, 0.08 + c.intensity * 0.3);
+      c.visual.halo.material.opacity = Math.min(1, 0.06 + c.intensity * 0.28);
       const charging = c.def.kind === 'stay' && !c.lit && c.charge > 0;
       const pulse = charging ? 1 + Math.sin(time * 18) * 0.06 : 1;
       c.visual.group.scale.setScalar(appear * pulse);
-      c.visual.mesh.rotation.y += dt * (c.intensity > 1.5 ? 1.4 : 0.35);
+      c.visual.mesh.rotation.y += dt * (c.intensity > 1.5 ? 1.2 : 0.3);
       c.visual.group.position.y = c.baseY + Math.sin(time * 1.3 + i * 1.7) * 0.004;
     }
 
@@ -976,11 +981,12 @@ export class PrismGameSystem extends createSystem({}) {
   }
 
   private updateHint(time: number): void {
-    const show = !!this.level.hint && !this.anyLit && this.state === 'play';
+    const show =
+      !!this.level.hint && !this.anyLit && this.state === 'play' && this.immersive;
     this.hint.group.visible = show;
     if (!show) return;
     const s = 0.5 + 0.5 * Math.sin(time * 3);
-    this.hint.fill.opacity = 0.04 + 0.08 * s;
-    this.hint.ring.opacity = 0.15 + 0.35 * s;
+    this.hint.fill.opacity = 0.05 + 0.1 * s;
+    this.hint.ring.opacity = 0.2 + 0.5 * s;
   }
 }

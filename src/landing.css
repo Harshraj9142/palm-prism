@@ -1,0 +1,181 @@
+/* Palm Prism landing: shown over the live 3D scene before entering VR. */
+
+:root {
+  --ink: #f6eedf;
+  --ink-soft: #c9bda8;
+  --brass: #d8a74e;
+  --brass-deep: #a7792f;
+  --night: #070a14;
+  --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Noto Serif', serif;
+  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
+}
+
+html,
+body {
+  background: var(--night);
+}
+
+.pp-landing {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: flex-end;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(7, 10, 20, 0.95) 0%,
+    rgba(7, 10, 20, 0.88) 40%,
+    rgba(7, 10, 20, 0.35) 58%,
+    rgba(7, 10, 20, 0) 72%
+  );
+  transition: opacity 0.5s ease;
+}
+
+.pp-landing[hidden] {
+  display: none;
+}
+
+.pp-card {
+  pointer-events: auto;
+  box-sizing: border-box;
+  width: min(560px, 100%);
+  padding: 0 clamp(20px, 6vw, 72px) clamp(28px, 8vh, 80px);
+  color: var(--ink);
+  font-family: var(--sans);
+}
+
+.pp-kicker {
+  margin: 0 0 14px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+
+.pp-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: clamp(48px, 9vw, 84px);
+  line-height: 0.95;
+  letter-spacing: -0.01em;
+}
+
+.pp-title em {
+  font-style: italic;
+  color: var(--brass);
+}
+
+.pp-lede {
+  margin: 20px 0 26px;
+  max-width: 30em;
+  font-family: var(--serif);
+  font-size: clamp(17px, 2.2vw, 20px);
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.pp-steps {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 30px;
+  padding: 0;
+  list-style: none;
+}
+
+.pp-steps li {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 14px;
+  align-items: center;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.pp-steps svg {
+  width: 36px;
+  height: 36px;
+  stroke: var(--brass);
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pp-enter {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 28px;
+  border: 1.5px solid var(--brass);
+  border-radius: 999px;
+  background: var(--brass);
+  color: #1d160c;
+  font: 700 15px/1 var(--sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    transform 0.2s ease;
+}
+
+.pp-enter:hover {
+  background: #e8bb62;
+  transform: translateY(-1px);
+}
+
+.pp-enter:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.pp-enter[disabled] {
+  background: transparent;
+  color: var(--ink-soft);
+  border-color: rgba(201, 189, 168, 0.4);
+  cursor: default;
+  transform: none;
+}
+
+.pp-note {
+  margin: 14px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.pp-progress {
+  margin: 22px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid rgba(216, 167, 78, 0.25);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 720px) {
+  .pp-landing {
+    align-items: flex-end;
+    background: linear-gradient(
+      0deg,
+      rgba(7, 10, 20, 0.95) 0%,
+      rgba(7, 10, 20, 0.75) 55%,
+      rgba(7, 10, 20, 0) 100%
+    );
+  }
+
+  .pp-steps {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pp-landing,
+  .pp-enter {
+    transition: none;
+  }
+}

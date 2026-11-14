@@ -1,17 +1,6 @@
-import { AssetType, defineAssets } from '@iwsdk/core';
+import { defineAssets } from '@iwsdk/core';
 
-const publicAssetUrl = (filePath: string): string =>
-  `${import.meta.env.BASE_URL}${filePath.replace(/^\/+/u, '')}`;
-
-const uikitml = (fileName: string, name: string) => ({
-  url: publicAssetUrl(`ui/${fileName}`),
-  type: AssetType.UIKitML,
-  name,
-});
-
-// Game geometry is built at runtime in src/prism-visuals.ts; the scene only
-// places the two UI panels.
-export default defineAssets({
-  'welcome-panel': uikitml('welcome.uikitml', 'Welcome Panel'),
-  'hud-panel': uikitml('hud.uikitml', 'HUD Panel'),
-});
+// Palm Prism builds all of its geometry, textures and UI at runtime
+// (src/prism-visuals.ts, src/hud.ts) and generates its sounds (src/audio.ts),
+// so there is nothing to download or place from the manifest.
+export default defineAssets({});

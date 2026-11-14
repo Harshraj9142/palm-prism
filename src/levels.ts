@@ -6,8 +6,8 @@
  * player (|x|,|z| <= 0.24, 0.05 <= y <= 0.4).
  *
  * Crystal kinds:
- *  - `stay`  (gold): charge it once and it stays lit for the rest of the level.
- *  - `pulse` (blue): glows only while light flows through it. Every pulse
+ *  - `stay`  (amber): charge it once and it stays lit for the rest of the level.
+ *  - `pulse` (teal): glows only while light flows through it. Every pulse
  *    crystal must be lit at the same moment.
  */
 
@@ -54,7 +54,7 @@ export const LEVELS: LevelDef[] = [
   {
     id: 'first-light',
     title: 'First Light',
-    tip: 'Hold your palm over the light, then tilt it.',
+    tip: 'Hold your palm over the lamp, then tilt it toward the amber crystal.',
     emitter: { pos: [0, 0.015, 0], dir: [0, 1, 0] },
     crystals: [{ pos: [0.17, 0.2, -0.06], note: 0, kind: 'stay' }],
     blockers: [],
@@ -66,7 +66,7 @@ export const LEVELS: LevelDef[] = [
   {
     id: 'two-notes',
     title: 'Two Notes',
-    tip: 'Tilt your palm to aim. Light every crystal.',
+    tip: 'Every crystal is a note. Light them both.',
     emitter: { pos: [0, 0.015, 0.03], dir: [0, 1, 0] },
     crystals: [
       { pos: [-0.16, 0.17, -0.05], note: 1, kind: 'stay' },
@@ -84,7 +84,7 @@ export const LEVELS: LevelDef[] = [
   {
     id: 'side-light',
     title: 'Side Light',
-    tip: 'Light can come from the side. Turn your palm to face it.',
+    tip: 'This lamp lies on its side. Turn your palm to meet it.',
     emitter: { pos: [-0.22, 0.12, 0.04], dir: [1, 0, 0] },
     crystals: [
       { pos: [0.02, 0.3, -0.14], note: 2, kind: 'stay' },
@@ -101,7 +101,7 @@ export const LEVELS: LevelDef[] = [
   {
     id: 'over-the-wall',
     title: 'Over the Wall',
-    tip: 'Blocked? Use both hands. Each palm is a mirror.',
+    tip: "One hand can't reach. Use both: each palm is a mirror.",
     emitter: { pos: [0.13, 0.015, 0.05], dir: [0, 1, 0] },
     crystals: [{ pos: [-0.15, 0.08, 0], note: 5, kind: 'stay' }],
     blockers: [{ min: [-0.025, 0, -0.14], max: [0.005, 0.3, 0.14] }],
@@ -112,7 +112,7 @@ export const LEVELS: LevelDef[] = [
   {
     id: 'hold-the-light',
     title: 'Hold the Light',
-    tip: 'Blue crystals glow only while light flows. Light both at once.',
+    tip: 'Teal crystals sing only while lit. Light both at once.',
     emitter: { pos: [0, 0.015, 0.06], dir: [0, 1, 0] },
     crystals: [
       { pos: [-0.12, 0.22, 0.06], note: 0, kind: 'pulse' },
@@ -126,7 +126,7 @@ export const LEVELS: LevelDef[] = [
   {
     id: 'three-notes',
     title: 'Three Notes',
-    tip: 'Three mirrors, two hands. Pinch to freeze one in place.',
+    tip: 'Three bounces, two hands. Pinch to leave a mirror behind.',
     emitter: { pos: [0.16, 0.015, 0.1], dir: [0, 1, 0] },
     crystals: [
       { pos: [0, 0.3, 0.1], note: 1, kind: 'pulse' },
@@ -168,7 +168,7 @@ export const LEVELS: LevelDef[] = [
   {
     id: 'constellation',
     title: 'Constellation',
-    tip: 'Four stars. Build the path one frozen mirror at a time.',
+    tip: 'Four notes. Leave mirrors behind as you go.',
     emitter: { pos: [0.18, 0.015, -0.12], dir: [0, 1, 0] },
     crystals: [
       { pos: [0, 0.26, -0.12], note: 0, kind: 'pulse' },

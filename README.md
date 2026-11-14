@@ -32,7 +32,7 @@ certificate warning, then press **Enter VR**.
 | Freeze a mirror | Pinch while your palm is over the board. Limited per level. |
 | Gold crystal | Hold light on it briefly; it stays lit. |
 | Blue crystal | Glows only while light flows through it. Light every blue crystal at once. |
-| Reset / Center / Daily / Next | Point at the panel above the board and pinch. |
+| Restart / Daily / Next / Re-center | Point at the paper card above the board and pinch. |
 
 Stars: clear a level within its freeze par for 3 stars. Every star you earn
 adds a star to your sky, and clearing a level each day grows your streak.
@@ -55,11 +55,12 @@ Useful for testing and for recording the demo video.
 | `src/beam.ts` | Pure beam-tracing math (no Three.js), shared with the level checker |
 | `src/levels.ts` | The 8 levels plus a known solution for each |
 | `src/daily.ts` | Daily Prism generator (seeded by date, self-validating) |
-| `src/prism-visuals.ts` | Procedural board, crystals, beam, mirrors, sky and floor |
+| `src/prism-visuals.ts` | Night-observatory look: brass astrolabe board, lamplight beam with dust, crystals, mirrors, sky with your constellation, floor |
 | `src/audio.ts` | Generated sounds (no audio files) |
 | `src/progress.ts` | Unlocks, stars and daily streak in localStorage |
-| `public/ui/hud.uikitml` | In-headset HUD panel |
-| `public/ui/welcome.uikitml` | Browser landing panel |
+| `src/hud.ts` | Hand-drawn in-headset HUD card, buttons and floating level titles |
+| `src/landing.ts`, `src/landing.css` | Browser landing page over the live 3D scene |
+| `src/prism-button.ts` | ECS component for pressable HUD buttons |
 | `scripts/verify-levels.ts` | Proves every level, and a year of daily puzzles, is solvable with the real tracer |
 
 ## Checks

@@ -1,5 +1,4 @@
 import { defineComponents } from '@iwsdk/core';
+import { PrismButton } from './prism-button.js';
 
-// Palm Prism keeps its game state inside PrismGameSystem, so it declares no
-// custom ECS components yet. Add them here when scenes need to author them.
-export default defineComponents([]);
+export default defineComponents([PrismButton]);
