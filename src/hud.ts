@@ -16,7 +16,21 @@ import {
   SRGBColorSpace,
 } from '@iwsdk/core';
 
-export type HudAction = 'restart' | 'daily' | 'next' | 'recenter';
+export type HudAction =
+  | 'restart'
+  | 'daily'
+  | 'harp'
+  | 'next'
+  | 'options'
+  | 'recenter'
+  | 'opt-hold'
+  | 'opt-onehand'
+  | 'opt-raise'
+  | 'opt-lower'
+  | 'opt-done';
+
+export type HudGroup = 'main' | 'options';
+type ButtonIcon = 'none' | 'target' | 'gear';
 
 export interface HudState {
   label: string;
@@ -27,6 +41,10 @@ export interface HudState {
   freezesLeft: number;
   streak: number;
   solved: boolean;
+  /** Hide the stars (free play and the options page). */
+  hideStars?: boolean;
+  /** Hide the freezes and streak row (options page). */
+  hideMeta?: boolean;
 }
 
 const INK = '#2a2219';
@@ -163,23 +181,35 @@ interface ButtonVisual {
   mesh: Mesh;
   material: MeshBasicMaterial;
   label: string;
-  icon: 'none' | 'target';
+  icon: ButtonIcon;
+  group: HudGroup;
   normal: CanvasTexture;
   hover: CanvasTexture;
   hovered: boolean;
   enabled: boolean;
 }
 
-const BUTTON_LAYOUT: Record<HudAction, { x: number; w: number; label: string; icon: 'none' | 'target' }> = {
-  restart: { x: 150, w: 220, label: 'Restart', icon: 'none' },
-  daily: { x: 390, w: 200, label: 'Daily', icon: 'none' },
-  next: { x: 630, w: 240, label: 'Next', icon: 'none' },
-  recenter: { x: 890, w: 120, label: '', icon: 'target' },
+const BUTTON_LAYOUT: Record<
+  HudAction,
+  { x: number; w: number; label: string; icon: ButtonIcon; group: HudGroup }
+> = {
+  restart: { x: 142, w: 180, label: 'Restart', icon: 'none', group: 'main' },
+  daily: { x: 319, w: 150, label: 'Daily', icon: 'none', group: 'main' },
+  harp: { x: 481, w: 150, label: 'Harp', icon: 'none', group: 'main' },
+  next: { x: 658, w: 180, label: 'Next', icon: 'none', group: 'main' },
+  options: { x: 810, w: 100, label: '', icon: 'gear', group: 'main' },
+  recenter: { x: 922, w: 100, label: '', icon: 'target', group: 'main' },
+  'opt-hold': { x: 187, w: 270, label: 'Hold to freeze: Off', icon: 'none', group: 'options' },
+  'opt-onehand': { x: 449, w: 230, label: 'One hand: Off', icon: 'none', group: 'options' },
+  'opt-raise': { x: 631, w: 110, label: 'Raise', icon: 'none', group: 'options' },
+  'opt-lower': { x: 753, w: 110, label: 'Lower', icon: 'none', group: 'options' },
+  'opt-done': { x: 896, w: 152, label: 'Done', icon: 'none', group: 'options' },
 };
 const BUTTON_Y = 474;
+const BUTTON_Z = 0.004;
 const BUTTON_H = 78;
 
-/** The paper HUD card plus its four buttons. */
+/** The paper HUD card plus its main and options button rows. */
 export class Hud {
   readonly root = new Group();
   readonly buttons = {} as Record<HudAction, ButtonVisual>;
@@ -210,13 +240,15 @@ export class Hud {
       mesh.position.set(
         (spec.x - CARD_W / 2) * PX,
         (CARD_H / 2 - BUTTON_Y) * PX,
-        0.004,
+        BUTTON_Z,
       );
+      mesh.visible = spec.group === 'main';
       this.buttons[action] = {
         mesh,
         material,
         label: spec.label,
         icon: spec.icon,
+        group: spec.group,
         normal,
         hover,
         hovered: false,
@@ -228,7 +260,7 @@ export class Hud {
   private drawButton(
     w: number,
     label: string,
-    icon: 'none' | 'target',
+    icon: ButtonIcon,
     hovered: boolean,
   ): CanvasTexture {
     const scale = 2;
@@ -266,8 +298,34 @@ export class Hud {
         ctx.lineTo(cx + dx * 26, cy + dy * 26);
         ctx.stroke();
       }
+    } else if (icon === 'gear') {
+      const cx = w / 2;
+      const cy = BUTTON_H / 2;
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * 13, cy + Math.sin(a) * 13);
+        ctx.lineTo(cx + Math.cos(a) * 21, cy + Math.sin(a) * 21);
+        ctx.lineWidth = 6;
+        ctx.stroke();
+      }
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+      ctx.fillStyle = hovered ? BRASS_LIGHT : '#efe4d1';
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+      ctx.stroke();
     } else {
-      ctx.font = `600 32px ${SANS}`;
+      let size = 32;
+      ctx.font = `600 ${size}px ${SANS}`;
+      while (size > 20 && ctx.measureText(label).width > w - 34) {
+        size -= 1;
+        ctx.font = `600 ${size}px ${SANS}`;
+      }
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(label, w / 2, BUTTON_H / 2 + 2);
@@ -286,6 +344,18 @@ export class Hud {
     b.hover = this.drawButton(spec.w, label, spec.icon, true);
     b.material.map = b.hovered ? b.hover : b.normal;
     b.material.needsUpdate = true;
+  }
+
+  /** Show one row of buttons. Returns nothing; the caller toggles ray targets. */
+  showGroup(group: HudGroup, nextVisible: boolean): void {
+    for (const action of Object.keys(this.buttons) as HudAction[]) {
+      const b = this.buttons[action];
+      const shown = b.group === group && (action !== 'next' || nextVisible);
+      b.mesh.visible = shown;
+      // Hidden buttons share space with the other row. Park them well behind
+      // the card so a ray can never land on one instead of a visible button.
+      b.mesh.position.z = shown ? BUTTON_Z : -0.5;
+    }
   }
 
   setHovered(action: HudAction, hovered: boolean): void {
@@ -310,7 +380,7 @@ export class Hud {
     spaced(ctx, 4);
     ctx.fillText(state.label.toUpperCase(), left, 78);
     spaced(ctx, 0);
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < (state.hideStars ? 0 : 3); i++) {
       starPath(ctx, right - 18 - (2 - i) * 46, 68, 18);
       if (i < state.stars) {
         ctx.fillStyle = BRASS_LIGHT;
@@ -330,16 +400,22 @@ export class Hud {
     ctx.fillStyle = INK_SOFT;
     ctx.font = `italic 31px ${SERIF}`;
     wrap(ctx, state.tip, right - left - (state.solved ? 170 : 0))
-      .slice(0, 2)
+      .slice(0, state.hideMeta ? 4 : 2)
       .forEach((line, i) => ctx.fillText(line, left, 218 + i * 40));
 
-    // Hairline.
-    ctx.strokeStyle = 'rgba(167,121,47,0.45)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(left, 312);
-    ctx.lineTo(right, 312);
-    ctx.stroke();
+    if (!state.hideMeta) {
+      ctx.strokeStyle = 'rgba(167,121,47,0.45)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(left, 312);
+      ctx.lineTo(right, 312);
+      ctx.stroke();
+    }
+
+    if (state.hideMeta) {
+      this.texture.needsUpdate = true;
+      return;
+    }
 
     // Freezes as hexagon tokens.
     ctx.font = `700 22px ${SANS}`;

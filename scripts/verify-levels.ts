@@ -20,6 +20,7 @@ import {
 import {
   CRYSTAL_AIM_ASSIST,
   CRYSTAL_RADIUS,
+  HARP_LEVEL,
   LEVELS,
   MIRROR_RADIUS,
   type Vec3,
@@ -138,6 +139,39 @@ for (const level of LEVELS) {
       `PASS ${level.id} (${level.crystals.length} crystals, ` +
         `${Math.max(...level.solutions.map((s) => s.length - 1))} mirrors)`,
     );
+  }
+}
+
+// Light Harp: every string must be reachable with a single palm over the lamp.
+{
+  const harp = HARP_LEVEL;
+  const strings: SphereTarget[] = harp.crystals.map((c) => ({
+    x: c.pos[0],
+    y: c.pos[1],
+    z: c.pos[2],
+    radius: CRYSTAL_RADIUS + CRYSTAL_AIM_ASSIST,
+  }));
+  const reached = new Set<number>();
+  for (const path of harp.solutions) {
+    const e = harp.emitter;
+    const inDir: Vec3 = [path[0][0] - e.pos[0], path[0][1] - e.pos[1], path[0][2] - e.pos[2]];
+    const outDir: Vec3 = [
+      path[1][0] - path[0][0],
+      path[1][1] - path[0][1],
+      path[1][2] - path[0][2],
+    ];
+    const n = mirrorNormalFor(inDir, outDir);
+    const trace = new BeamTrace(strings.length, 2);
+    traceBeam(e.pos[0], e.pos[1], e.pos[2], 0, 1, 0, [
+      { cx: path[0][0], cy: path[0][1], cz: path[0][2], nx: n[0], ny: n[1], nz: n[2], radius: MIRROR_RADIUS, active: true },
+    ], strings, [], trace);
+    strings.forEach((_, i) => trace.crystalHit[i] && reached.add(i));
+  }
+  if (reached.size === strings.length) {
+    console.log(`PASS light-harp (${strings.length} strings reachable)`);
+  } else {
+    failures++;
+    console.log(`FAIL light-harp: only ${reached.size} of ${strings.length} strings reachable`);
   }
 }
 

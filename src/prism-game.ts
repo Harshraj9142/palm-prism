@@ -13,7 +13,11 @@ import {
   createSystem,
   Euler,
   Group,
+  BufferGeometry,
+  Float32BufferAttribute,
   Hovered,
+  Line,
+  LineDashedMaterial,
   Matrix4,
   MeshBasicMaterial,
   Object3D,
@@ -34,11 +38,12 @@ import {
   type SphereTarget,
 } from './beam.js';
 import { createDailyLevel, todayKey } from './daily.js';
-import { Hud, TitleCard, type HudAction, type HudState } from './hud.js';
+import { Hud, TitleCard, type HudAction, type HudGroup, type HudState } from './hud.js';
 import {
   CHARGE_SECONDS,
   CRYSTAL_AIM_ASSIST,
   CRYSTAL_RADIUS,
+  HARP_LEVEL,
   HOLD_SECONDS,
   LEVELS,
   MIRROR_RADIUS,
@@ -65,6 +70,7 @@ import {
   type MirrorVisual,
   type Sky,
 } from './prism-visuals.js';
+import { loadSettings, saveSettings, type Settings } from './settings.js';
 import {
   currentStreak,
   loadProgress,
@@ -77,7 +83,21 @@ type Side = 'left' | 'right';
 type GameState = 'intro' | 'play' | 'clear' | 'finale';
 
 const SIDES: Side[] = ['left', 'right'];
-const HUD_ACTIONS: HudAction[] = ['restart', 'daily', 'next', 'recenter'];
+const HUD_ACTIONS: HudAction[] = [
+  'restart',
+  'daily',
+  'harp',
+  'next',
+  'options',
+  'recenter',
+  'opt-hold',
+  'opt-onehand',
+  'opt-raise',
+  'opt-lower',
+  'opt-done',
+];
+/** Seconds a palm must stay still to freeze when hold-to-freeze is on. */
+const HOLD_FREEZE_SECONDS = 2;
 const HISTORY = 12;
 /** Frames to look back when freezing, so the pinch motion itself is ignored. */
 const FREEZE_LOOKBACK = 7;
@@ -86,9 +106,12 @@ const MAX_FROZEN = 4;
 const BOARD_DISTANCE = 0.5;
 const BOARD_DROP = 0.42;
 const DESKTOP_BOARD_POSITION = new Vector3(0.12, 1.0, -0.5);
-// High enough that hand rays from the play area pass under it, so pinches
-// over the board freeze mirrors instead of hovering the panel.
-const HUD_LOCAL = new Vector3(0, 0.64, -0.38);
+// Off to the left and turned toward the player: beams that rise from the
+// lamp never cross it, and hand rays over the board point past it, so
+// pinches there freeze mirrors instead of pressing buttons.
+const HUD_LOCAL = new Vector3(-0.42, 0.56, -0.12);
+const HUD_YAW = 0.5;
+const HUD_TILT = -0.12;
 const TITLE_LOCAL_Y = 0.34;
 const HIDDEN_Y = -100;
 const INTRO_SECONDS = 0.6;
@@ -218,6 +241,21 @@ export class PrismGameSystem extends createSystem({
   private hudEntity!: Entity;
   private titleCard!: TitleCard;
   private hoverCount = 0;
+  private buttonEntities = {} as Record<HudAction, Entity>;
+  private hudGroup: HudGroup = 'main';
+  private nextVisible = false;
+  private isHarp = false;
+  private settings!: Settings;
+  /** Hold-to-freeze: per palm, seconds held still and the pose it started at. */
+  private dwell = {
+    left: { t: 0, armed: true, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 },
+    right: { t: 0, armed: true, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 },
+  };
+  // Onboarding ghost: tilts from flat to the right angle, then shows the path.
+  private ghostFrom = new Quaternion();
+  private ghostTo = new Quaternion();
+  private ghostLine!: Line;
+  private ghostLineMat!: LineDashedMaterial;
 
   // Scratch objects, allocated once.
   private boardInv = new Matrix4();
@@ -235,6 +273,7 @@ export class PrismGameSystem extends createSystem({
 
   init(): void {
     this.progress = loadProgress();
+    this.settings = loadSettings();
 
     this.world.createTransformEntity(createFloor(), { persistent: true });
     this.sky = createSky();
@@ -277,6 +316,23 @@ export class PrismGameSystem extends createSystem({
     ];
     this.hint = createMirrorVisual(COLORS.palm);
     this.board.add(this.hint.group);
+    this.ghostLineMat = new LineDashedMaterial({
+      color: COLORS.beamGlow,
+      dashSize: 0.012,
+      gapSize: 0.01,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    this.ghostLine = new Line(
+      new BufferGeometry().setAttribute(
+        'position',
+        new Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3),
+      ),
+      this.ghostLineMat,
+    );
+    this.ghostLine.visible = false;
+    this.board.add(this.ghostLine);
 
     this.titleCard = new TitleCard();
     this.titleCard.mesh.position.set(0, TITLE_LOCAL_Y, -0.04);
@@ -302,7 +358,7 @@ export class PrismGameSystem extends createSystem({
     );
 
     // Dev shortcuts for testing and video capture: N next, P previous,
-    // R reset, D daily puzzle, 1-8 jump to a level, I log beam state.
+    // R reset, D daily puzzle, H light harp, 1-8 jump to a level, I log beam state.
     if (import.meta.env.DEV) {
       const onKey = (event: KeyboardEvent) => {
         const key = event.key.toLowerCase();
@@ -311,6 +367,7 @@ export class PrismGameSystem extends createSystem({
           this.loadLevel((this.levelIndex - 1 + LEVELS.length) % LEVELS.length);
         else if (key === 'r') this.restart();
         else if (key === 'd') this.loadDaily();
+        else if (key === 'h') this.loadHarp();
         else if (key >= '1' && key <= '9') this.loadLevel(Number(key) - 1);
         else if (key === 'i') this.logDebug();
       };
@@ -361,14 +418,18 @@ export class PrismGameSystem extends createSystem({
       });
       mesh.position.copy(home);
       entity.addComponent(PrismButton, { action });
-      entity.addComponent(RayInteractable);
+      this.buttonEntities[action] = entity;
     }
+    this.applyButtonTargets();
 
     const actionOf = (entity: Entity) =>
       (entity.getValue(PrismButton, 'action') ?? '') as HudAction;
     this.cleanupFuncs.push(
-      this.queries.pressed.subscribe('qualify', (entity) => {
-        prismAudio.ensure();
+      // Unlock audio on press (a user gesture), but act on release, like a
+      // normal click. Acting on press would hide or swap the very button
+      // still being held, which leaves the pointer stuck on it.
+      this.queries.pressed.subscribe('qualify', () => prismAudio.ensure()),
+      this.queries.pressed.subscribe('disqualify', (entity) => {
         this.onButton(actionOf(entity));
       }),
       this.queries.hovered.subscribe('qualify', (entity) => {
@@ -392,11 +453,39 @@ export class PrismGameSystem extends createSystem({
       case 'daily':
         this.loadDaily();
         break;
+      case 'harp':
+        this.loadHarp();
+        break;
+      case 'options':
+        this.setHudGroup('options');
+        break;
+      case 'opt-done':
+        this.setHudGroup('main');
+        break;
+      case 'opt-hold':
+        this.settings.holdToFreeze = !this.settings.holdToFreeze;
+        this.saveSettingsAndRefresh();
+        break;
+      case 'opt-onehand':
+        this.settings.oneHand = !this.settings.oneHand;
+        this.saveSettingsAndRefresh();
+        break;
+      case 'opt-raise':
+      case 'opt-lower': {
+        const step = action === 'opt-raise' ? 0.04 : -0.04;
+        this.settings.boardOffset = Math.max(
+          -0.2,
+          Math.min(0.2, this.settings.boardOffset + step),
+        );
+        this.saveSettingsAndRefresh();
+        this.recenter();
+        break;
+      }
       case 'recenter':
         this.recenter();
         break;
       case 'next':
-        if (this.isDaily) this.loadLevel(this.progress.unlocked);
+        if (this.isDaily || this.isHarp) this.loadLevel(this.progress.unlocked);
         else if (this.state === 'finale') this.loadDaily();
         else if (this.state === 'clear') this.advance();
         break;
@@ -404,7 +493,43 @@ export class PrismGameSystem extends createSystem({
   }
 
   private setNextVisible(visible: boolean): void {
-    this.hud.buttons.next.mesh.visible = visible;
+    this.nextVisible = visible;
+    this.applyButtonTargets();
+  }
+
+  private setHudGroup(group: HudGroup): void {
+    this.hudGroup = group;
+    this.applyButtonTargets();
+    this.redrawHud();
+  }
+
+  /** Show the active button row and make only visible buttons ray targets. */
+  private applyButtonTargets(): void {
+    this.hud.showGroup(this.hudGroup, this.nextVisible);
+    for (const action of HUD_ACTIONS) {
+      const entity = this.buttonEntities[action];
+      if (!entity) continue;
+      const visible = this.hud.buttons[action].mesh.visible;
+      const has = entity.hasComponent(RayInteractable);
+      if (visible && !has) entity.addComponent(RayInteractable);
+      else if (!visible && has) entity.removeComponent(RayInteractable);
+    }
+  }
+
+  private saveSettingsAndRefresh(): void {
+    saveSettings(this.settings);
+    this.hud.setButtonLabel(
+      'opt-hold',
+      `Hold to freeze: ${this.settings.holdToFreeze ? 'On' : 'Off'}`,
+    );
+    this.hud.setButtonLabel('opt-onehand', `One hand: ${this.settings.oneHand ? 'On' : 'Off'}`);
+    this.redrawHud();
+  }
+
+  /** Freezes available this level, including the one-hand bonus. */
+  private freezeAllowance(): number {
+    if (this.isHarp) return this.level.freezes;
+    return this.level.freezes + (this.settings.oneHand ? 1 : 0);
   }
 
   private placeHud(): void {
@@ -419,7 +544,7 @@ export class PrismGameSystem extends createSystem({
     this.vA.copy(HUD_LOCAL);
     this.board.localToWorld(this.vA);
     root.position.copy(this.vA);
-    this.euler.set(-0.22, this.board.rotation.y, 0, 'YXZ');
+    this.euler.set(HUD_TILT, this.board.rotation.y + HUD_YAW, 0, 'YXZ');
     this.quat.setFromEuler(this.euler);
     root.quaternion.copy(this.quat);
   }
@@ -427,17 +552,36 @@ export class PrismGameSystem extends createSystem({
   private hudState(): HudState {
     const level = this.level;
     const solved = this.state === 'clear' || this.state === 'finale';
+    if (this.hudGroup === 'options') {
+      return {
+        label: 'Comfort and access',
+        title: 'Options',
+        tip:
+          'Hold to freeze: keep a palm still for two seconds instead of pinching. ' +
+          'One hand: every level gets an extra freeze. Raise or lower moves the board.',
+        stars: 0,
+        freezesTotal: 0,
+        freezesLeft: 0,
+        streak: 0,
+        solved: false,
+        hideStars: true,
+        hideMeta: true,
+      };
+    }
     return {
-      label: this.isDaily
-        ? `Daily Prism · ${prettyDate(todayKey())}`
-        : `Level ${this.levelIndex + 1} of ${LEVELS.length}`,
+      label: this.isHarp
+        ? 'Free play'
+        : this.isDaily
+          ? `Daily Prism · ${prettyDate(todayKey())}`
+          : `Level ${this.levelIndex + 1} of ${LEVELS.length}`,
       title: level.title,
       tip: this.tipOverride ?? (solved ? this.solvedLine() : level.tip),
       stars: solved ? this.lastStars : (this.progress.stars[level.id] ?? 0),
-      freezesTotal: level.freezes,
-      freezesLeft: level.freezes - this.freezesUsed,
+      freezesTotal: this.freezeAllowance(),
+      freezesLeft: this.freezeAllowance() - this.freezesUsed,
       streak: currentStreak(this.progress),
       solved,
+      hideStars: this.isHarp,
     };
   }
 
@@ -462,16 +606,25 @@ export class PrismGameSystem extends createSystem({
   private loadLevel(index: number): void {
     this.levelIndex = Math.max(0, Math.min(index, LEVELS.length - 1));
     this.isDaily = false;
+    this.isHarp = false;
     this.startLevel(LEVELS[this.levelIndex]);
+  }
+
+  private loadHarp(): void {
+    this.isDaily = false;
+    this.isHarp = true;
+    this.startLevel(HARP_LEVEL);
   }
 
   private loadDaily(): void {
     this.isDaily = true;
+    this.isHarp = false;
     this.startLevel(createDailyLevel(todayKey()));
   }
 
   private restart(): void {
-    if (this.isDaily) this.loadDaily();
+    if (this.isHarp) this.loadHarp();
+    else if (this.isDaily) this.loadDaily();
     else this.loadLevel(this.levelIndex);
   }
 
@@ -537,8 +690,18 @@ export class PrismGameSystem extends createSystem({
       const t = level.hint.toward;
       const n = mirrorNormalFor(inDir, [t[0] - c[0], t[1] - c[1], t[2] - c[2]]);
       placeMirror(this.hint, c[0], c[1], c[2], n[0], n[1], n[2]);
+      this.ghostTo.copy(this.hint.group.quaternion);
+      // Start flat, facing the lamp.
+      this.vA.set(-inDir[0], -inDir[1], -inDir[2]);
+      this.ghostFrom.setFromUnitVectors(this.vB.set(0, 0, 1), this.vA);
+      const pos = this.ghostLine.geometry.getAttribute('position') as Float32BufferAttribute;
+      pos.setXYZ(0, c[0], c[1], c[2]);
+      pos.setXYZ(1, t[0], t[1], t[2]);
+      pos.needsUpdate = true;
+      this.ghostLine.computeLineDistances();
     }
     this.hint.group.visible = false;
+    this.ghostLine.visible = false;
 
     // Browser attract mode: a glass pane on the first bounce of the known
     // solution, so the landing view shows light bending into a crystal.
@@ -565,10 +728,16 @@ export class PrismGameSystem extends createSystem({
     this.anyLit = false;
     this.tipOverride = null;
     this.tipTimer = 0;
+    this.dwell.left.t = this.dwell.right.t = 0;
     this.setState('intro');
-    this.setNextVisible(false);
+    if (this.isHarp) this.hud.setButtonLabel('next', 'Levels');
+    this.setNextVisible(this.isHarp);
     this.titleCard.show(
-      this.isDaily ? `Daily Prism · ${prettyDate(todayKey())}` : `Level ${ROMAN[this.levelIndex]}`,
+      this.isHarp
+        ? 'Free play'
+        : this.isDaily
+          ? `Daily Prism · ${prettyDate(todayKey())}`
+          : `Level ${ROMAN[this.levelIndex]}`,
       level.title,
     );
     this.redrawHud();
@@ -585,8 +754,9 @@ export class PrismGameSystem extends createSystem({
 
   private clearLevel(): void {
     const level = this.level;
+    const par = level.par + (this.settings.oneHand ? 1 : 0);
     const stars =
-      this.freezesUsed <= level.par ? 3 : this.freezesUsed <= level.par + 1 ? 2 : 1;
+      this.freezesUsed <= par ? 3 : this.freezesUsed <= par + 1 ? 2 : 1;
     this.lastStars = stars;
     this.progress = recordClear(
       this.progress,
@@ -639,7 +809,7 @@ export class PrismGameSystem extends createSystem({
     this.vB.y = 0;
     if (this.vB.lengthSq() < 1e-6) this.vB.set(0, 0, -1);
     this.vB.normalize();
-    const y = Math.max(0.5, this.vA.y - BOARD_DROP);
+    const y = Math.max(0.4, this.vA.y - BOARD_DROP + this.settings.boardOffset);
     this.board.position.set(
       this.vA.x + this.vB.x * BOARD_DISTANCE,
       y,
@@ -670,6 +840,8 @@ export class PrismGameSystem extends createSystem({
       `[PalmPrism] debug ${JSON.stringify({
         level: this.level.id,
         state: this.state,
+        settings: this.settings,
+        freezesUsed: this.freezesUsed,
         emitter: this.level.emitter,
         solution: this.level.solutions[0],
         points,
@@ -805,12 +977,13 @@ export class PrismGameSystem extends createSystem({
       return;
     }
     const level = this.level;
-    if (level.freezes === 0) {
+    const allowance = this.freezeAllowance();
+    if (allowance === 0) {
       this.flashTip('No freezes here. Just your palms.');
       prismAudio.deny();
       return;
     }
-    if (this.freezesUsed >= level.freezes) {
+    if (this.freezesUsed >= allowance) {
       this.flashTip('No freezes left. Restart to try again.');
       prismAudio.deny();
       return;
@@ -888,6 +1061,8 @@ export class PrismGameSystem extends createSystem({
       const hit = this.trace.mirrorHit[i] === 1;
       p.visual.fill.opacity = hit ? 0.3 : 0.14;
       p.visual.ring.opacity = hit ? 1 : 0.7;
+      p.visual.ring.color.copy(COLORS.brass);
+      this.updateDwell(p, dt);
     }
 
     this.stateTime += dt;
@@ -949,7 +1124,7 @@ export class PrismGameSystem extends createSystem({
         hasPulse = true;
         c.glow = hit ? 0.15 : c.glow - dt;
         const glowing = c.glow > 0;
-        if (glowing && !c.glowing && time - c.lastPing > 0.35) {
+        if (glowing && !c.glowing && time - c.lastPing > (this.isHarp ? 0.12 : 0.35)) {
           prismAudio.bell(c.def.note, 0.12);
           c.lastPing = time;
           this.bursts.spawn(c.def.pos[0], c.def.pos[1], c.def.pos[2], COLORS.blue, 0.1, 0.45);
@@ -971,7 +1146,7 @@ export class PrismGameSystem extends createSystem({
       c.visual.group.position.y = c.baseY + Math.sin(time * 1.3 + i * 1.7) * 0.004;
     }
 
-    if (!playing) return;
+    if (!playing || this.isHarp) return;
     if (allStay && allPulse) {
       this.holdTime += dt;
       if (!hasPulse || this.holdTime >= HOLD_SECONDS) this.clearLevel();
@@ -980,13 +1155,73 @@ export class PrismGameSystem extends createSystem({
     }
   }
 
+  /**
+   * Onboarding ghost: a glass pane above the lamp tilts from flat to the right
+   * angle on a loop, then a dashed line shows where the light will go. It
+   * fades once a palm arrives or the first crystal lights. No words needed.
+   */
   private updateHint(time: number): void {
-    const show =
-      !!this.level.hint && !this.anyLit && this.state === 'play' && this.immersive;
+    const hint = this.level.hint;
+    let show = !!hint && !this.anyLit && this.state === 'play' && this.immersive;
+    if (show && hint) {
+      for (const side of SIDES) {
+        const m = this.palms[side].mirror;
+        if (
+          m.active &&
+          Math.hypot(m.cx - hint.center[0], m.cy - hint.center[1], m.cz - hint.center[2]) < 0.07
+        ) {
+          show = false;
+        }
+      }
+    }
     this.hint.group.visible = show;
+    this.ghostLine.visible = show;
     if (!show) return;
-    const s = 0.5 + 0.5 * Math.sin(time * 3);
-    this.hint.fill.opacity = 0.05 + 0.1 * s;
-    this.hint.ring.opacity = 0.2 + 0.5 * s;
+    const cycle = (time % 2.8) / 2.8;
+    const tilt = Math.min(1, Math.max(0, (cycle - 0.15) / 0.4));
+    const eased = tilt * tilt * (3 - 2 * tilt);
+    this.hint.group.quaternion.slerpQuaternions(this.ghostFrom, this.ghostTo, eased);
+    const glow = 0.5 + 0.5 * Math.sin(time * 3);
+    this.hint.fill.opacity = 0.06 + 0.1 * glow;
+    this.hint.ring.opacity = 0.3 + 0.5 * glow;
+    this.ghostLineMat.opacity = cycle > 0.55 ? Math.min(1, (cycle - 0.55) / 0.15) * 0.8 : 0;
+  }
+
+  /** Hold-to-freeze: a palm held still over the board for two seconds freezes. */
+  private updateDwell(p: PalmState, dt: number): void {
+    const d = this.dwell[p.side];
+    if (!this.settings.holdToFreeze || !p.valid || this.state !== 'play') {
+      d.t = 0;
+      return;
+    }
+    const m = p.mirror;
+    const moved = Math.hypot(m.cx - d.x, m.cy - d.y, m.cz - d.z);
+    const turned = m.nx * d.nx + m.ny * d.ny + m.nz * d.nz;
+    if (moved > 0.012 || Math.abs(turned) < 0.996) {
+      // Moving again: restart the timer from here, and re-arm once the
+      // palm has clearly left its last frozen spot.
+      if (moved > 0.04) d.armed = true;
+      d.x = m.cx;
+      d.y = m.cy;
+      d.z = m.cz;
+      d.nx = m.nx;
+      d.ny = m.ny;
+      d.nz = m.nz;
+      d.t = 0;
+      return;
+    }
+    if (!d.armed || !this.inPlayVolume(m) || this.freezesUsed >= this.freezeAllowance()) {
+      return;
+    }
+    d.t += dt;
+    // Warm the frame toward brass as the hold completes.
+    const k = Math.min(1, d.t / HOLD_FREEZE_SECONDS);
+    p.visual.ring.color.copy(COLORS.brass).lerp(COLORS.beamGlow, k);
+    p.visual.fill.opacity = 0.14 + 0.25 * k;
+    if (d.t >= HOLD_FREEZE_SECONDS) {
+      d.t = 0;
+      d.armed = false;
+      this.tryFreeze(p);
+    }
   }
 }

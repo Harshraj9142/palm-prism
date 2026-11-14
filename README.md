@@ -32,10 +32,21 @@ certificate warning, then press **Enter VR**.
 | Freeze a mirror | Pinch while your palm is over the board. Limited per level. |
 | Gold crystal | Hold light on it briefly; it stays lit. |
 | Blue crystal | Glows only while light flows through it. Light every blue crystal at once. |
-| Restart / Daily / Next / Re-center | Point at the paper card above the board and pinch. |
+| Restart / Daily / Harp / Next / Options / Re-center | Point at the paper card to the left of the board and pinch. |
 
 Stars: clear a level within its freeze par for 3 stars. Every star you earn
 adds a star to your sky, and clearing a level each day grows your streak.
+
+**Light Harp:** a free-play instrument. Eight crystals in an arc each ring one
+note; sweep the reflected beam across them to play, and freeze mirrors to hold
+notes for chords.
+
+**Options (gear button):** *Hold to freeze* (keep a palm still for two seconds
+instead of pinching), *One hand* (an extra freeze in every level, so every level
+can be solved with one hand), and *Raise* / *Lower* to move the board.
+
+**First level:** a glass pane above the lamp tilts on its own and a dashed line
+shows where the light will go, so new players learn the move without reading.
 
 **Daily Prism:** a new puzzle every day, generated from the date (same puzzle
 on every device). The generator builds the answer first, then places the
@@ -44,7 +55,7 @@ crystals on it, so every daily puzzle is solvable.
 ## Dev shortcuts (dev server only)
 
 In the browser window: **1-8** jump to a level, **N** / **P** next or previous,
-**R** reset, **D** today's Daily Prism, **I** log the beam path to the console.
+**R** reset, **D** today's Daily Prism, **H** Light Harp, **I** log the beam path to the console.
 Useful for testing and for recording the demo video.
 
 ## Project layout
@@ -53,11 +64,12 @@ Useful for testing and for recording the demo video.
 | --- | --- |
 | `src/prism-game.ts` | Main game system: palms to mirrors, beam, crystals, freezes, level flow, HUD |
 | `src/beam.ts` | Pure beam-tracing math (no Three.js), shared with the level checker |
-| `src/levels.ts` | The 8 levels plus a known solution for each |
+| `src/levels.ts` | The 8 levels and the Light Harp, each with a known solution |
 | `src/daily.ts` | Daily Prism generator (seeded by date, self-validating) |
 | `src/prism-visuals.ts` | Night-observatory look: brass astrolabe board, lamplight beam with dust, crystals, mirrors, sky with your constellation, floor |
 | `src/audio.ts` | Generated sounds (no audio files) |
 | `src/progress.ts` | Unlocks, stars and daily streak in localStorage |
+| `src/settings.ts` | Accessibility options in localStorage |
 | `src/hud.ts` | Hand-drawn in-headset HUD card, buttons and floating level titles |
 | `src/landing.ts`, `src/landing.css` | Browser landing page over the live 3D scene |
 | `src/prism-button.ts` | ECS component for pressable HUD buttons |

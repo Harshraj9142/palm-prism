@@ -48,6 +48,8 @@ export interface LevelDef {
    * (only valid when every crystal is `stay`).
    */
   solutions: Vec3[][];
+  /** `harp`: a free-play instrument with no goal (see HARP_LEVEL). */
+  mode?: 'harp';
 }
 
 export const LEVELS: LevelDef[] = [
@@ -201,3 +203,37 @@ export const MIRROR_RADIUS = 0.075;
 export const CHARGE_SECONDS = 0.6;
 /** Seconds every blue crystal must glow together to clear the level. */
 export const HOLD_SECONDS = 0.5;
+
+/**
+ * Light Harp: eight crystals in an arc around the lamp, one per note of the
+ * scale, low on the left to high on the right. Sweep a reflected beam across
+ * them to play. There is no goal; freezes hold notes for chords.
+ */
+export const HARP_LEVEL: LevelDef = (() => {
+  const centre: Vec3 = [0, 0.2, 0.05];
+  const crystals: CrystalDef[] = [];
+  const solutions: Vec3[][] = [];
+  for (let i = 0; i < 8; i++) {
+    const a = Math.PI + 0.25 + (i / 7) * (Math.PI - 0.5);
+    const p: Vec3 = [
+      Math.round(Math.cos(a) * 0.19 * 1000) / 1000,
+      Math.round((0.2 + Math.sin(i * 1.3) * 0.025) * 1000) / 1000,
+      Math.round((0.05 + Math.sin(a) * 0.19) * 1000) / 1000,
+    ];
+    crystals.push({ pos: p, note: i, kind: 'pulse' });
+    // One reflection from a palm above the lamp reaches each string.
+    solutions.push([centre, [p[0] * 2 - centre[0], p[1] * 2 - centre[1], p[2] * 2 - centre[2]]]);
+  }
+  return {
+    id: 'light-harp',
+    title: 'Light Harp',
+    tip: 'Sweep the light across the crystals to play. Pinch to hold a note.',
+    emitter: { pos: [0, 0.015, 0.05], dir: [0, 1, 0] },
+    crystals,
+    blockers: [],
+    freezes: 4,
+    par: 4,
+    mode: 'harp',
+    solutions,
+  };
+})();

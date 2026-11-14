@@ -28,7 +28,7 @@ export function mountLanding(world: World): void {
       <ul class="pp-steps">
         <li>${ICON_PALM}<span>Hold a palm over the lamp, tilt to aim.</span></li>
         <li>${ICON_PINCH}<span>Pinch to leave a brass mirror behind.</span></li>
-        <li>${ICON_CRYSTAL}<span>Light every crystal. A new puzzle waits each day.</span></li>
+        <li>${ICON_CRYSTAL}<span>Light every crystal, play the Light Harp, and return for a new puzzle each day.</span></li>
       </ul>
       <button class="pp-enter" type="button">Enter VR</button>
       <p class="pp-note">Best on Meta Quest 3 or 3S with hand tracking. No controllers needed.</p>
