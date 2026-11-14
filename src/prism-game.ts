@@ -85,16 +85,26 @@ type GameState = 'intro' | 'play' | 'clear' | 'finale';
 const SIDES: Side[] = ['left', 'right'];
 const HUD_ACTIONS: HudAction[] = [
   'restart',
+  'levels',
   'daily',
   'harp',
   'next',
   'options',
-  'recenter',
   'opt-hold',
   'opt-onehand',
   'opt-raise',
   'opt-lower',
+  'recenter',
   'opt-done',
+  'lvl-1',
+  'lvl-2',
+  'lvl-3',
+  'lvl-4',
+  'lvl-5',
+  'lvl-6',
+  'lvl-7',
+  'lvl-8',
+  'lvl-back',
 ];
 /** Seconds a palm must stay still to freeze when hold-to-freeze is on. */
 const HOLD_FREEZE_SECONDS = 2;
@@ -459,6 +469,24 @@ export class PrismGameSystem extends createSystem({
       case 'options':
         this.setHudGroup('options');
         break;
+      case 'levels':
+        this.setHudGroup('levels');
+        break;
+      case 'lvl-back':
+        this.setHudGroup('main');
+        break;
+      case 'lvl-1':
+      case 'lvl-2':
+      case 'lvl-3':
+      case 'lvl-4':
+      case 'lvl-5':
+      case 'lvl-6':
+      case 'lvl-7':
+      case 'lvl-8':
+        // Every level is open, so judges and players can jump anywhere.
+        this.hudGroup = 'main';
+        this.loadLevel(Number(action.slice(4)) - 1);
+        break;
       case 'opt-done':
         this.setHudGroup('main');
         break;
@@ -552,6 +580,26 @@ export class PrismGameSystem extends createSystem({
   private hudState(): HudState {
     const level = this.level;
     const solved = this.state === 'clear' || this.state === 'finale';
+    if (this.hudGroup === 'levels') {
+      return {
+        label: 'Every level is open',
+        title: 'Levels',
+        tip: '',
+        stars: 0,
+        freezesTotal: 0,
+        freezesLeft: 0,
+        streak: 0,
+        solved: false,
+        hideStars: true,
+        hideMeta: true,
+        levelList: LEVELS.map((l, i) => ({
+          numeral: ROMAN[i],
+          title: l.title,
+          stars: this.progress.stars[l.id] ?? 0,
+          current: !this.isDaily && !this.isHarp && i === this.levelIndex,
+        })),
+      };
+    }
     if (this.hudGroup === 'options') {
       return {
         label: 'Comfort and access',

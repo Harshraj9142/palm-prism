@@ -32,7 +32,7 @@ certificate warning, then press **Enter VR**.
 | Freeze a mirror | Pinch while your palm is over the board. Limited per level. |
 | Gold crystal | Hold light on it briefly; it stays lit. |
 | Blue crystal | Glows only while light flows through it. Light every blue crystal at once. |
-| Restart / Daily / Harp / Next / Options / Re-center | Point at the paper card to the left of the board and pinch. |
+| Restart / Levels / Daily / Harp / Next / Options | Point at the paper card to the left of the board and pinch. **Levels** opens every level directly; **Center** (in Options) re-centres the board. |
 
 Stars: clear a level within its freeze par for 3 stars. Every star you earn
 adds a star to your sky, and clearing a level each day grows your streak.
@@ -43,7 +43,11 @@ notes for chords.
 
 **Options (gear button):** *Hold to freeze* (keep a palm still for two seconds
 instead of pinching), *One hand* (an extra freeze in every level, so every level
-can be solved with one hand), and *Raise* / *Lower* to move the board.
+can be solved with one hand), *Raise* / *Lower* to move the board, and *Center*
+to re-centre it in front of you.
+
+**Levels:** every level is open from the start, so anyone (judges included) can
+jump straight to the freeze puzzles, the Light Harp or the Daily Prism.
 
 **First level:** a glass pane above the lamp tilts on its own and a dashed line
 shows where the light will go, so new players learn the move without reading.

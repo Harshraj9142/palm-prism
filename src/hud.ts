@@ -27,9 +27,26 @@ export type HudAction =
   | 'opt-onehand'
   | 'opt-raise'
   | 'opt-lower'
-  | 'opt-done';
+  | 'opt-done'
+  | 'levels'
+  | 'lvl-1'
+  | 'lvl-2'
+  | 'lvl-3'
+  | 'lvl-4'
+  | 'lvl-5'
+  | 'lvl-6'
+  | 'lvl-7'
+  | 'lvl-8'
+  | 'lvl-back';
 
-export type HudGroup = 'main' | 'options';
+export type HudGroup = 'main' | 'options' | 'levels';
+
+export interface LevelEntry {
+  numeral: string;
+  title: string;
+  stars: number;
+  current: boolean;
+}
 type ButtonIcon = 'none' | 'target' | 'gear';
 
 export interface HudState {
@@ -45,6 +62,8 @@ export interface HudState {
   hideStars?: boolean;
   /** Hide the freezes and streak row (options page). */
   hideMeta?: boolean;
+  /** Level picker: a two-column list of levels with their best stars. */
+  levelList?: LevelEntry[];
 }
 
 const INK = '#2a2219';
@@ -193,17 +212,30 @@ const BUTTON_LAYOUT: Record<
   HudAction,
   { x: number; w: number; label: string; icon: ButtonIcon; group: HudGroup }
 > = {
-  restart: { x: 142, w: 180, label: 'Restart', icon: 'none', group: 'main' },
-  daily: { x: 319, w: 150, label: 'Daily', icon: 'none', group: 'main' },
-  harp: { x: 481, w: 150, label: 'Harp', icon: 'none', group: 'main' },
-  next: { x: 658, w: 180, label: 'Next', icon: 'none', group: 'main' },
-  options: { x: 810, w: 100, label: '', icon: 'gear', group: 'main' },
-  recenter: { x: 922, w: 100, label: '', icon: 'target', group: 'main' },
-  'opt-hold': { x: 187, w: 270, label: 'Hold to freeze: Off', icon: 'none', group: 'options' },
-  'opt-onehand': { x: 449, w: 230, label: 'One hand: Off', icon: 'none', group: 'options' },
-  'opt-raise': { x: 631, w: 110, label: 'Raise', icon: 'none', group: 'options' },
-  'opt-lower': { x: 753, w: 110, label: 'Lower', icon: 'none', group: 'options' },
-  'opt-done': { x: 896, w: 152, label: 'Done', icon: 'none', group: 'options' },
+  // Main row: 52..972 px.
+  restart: { x: 137, w: 170, label: 'Restart', icon: 'none', group: 'main' },
+  levels: { x: 310, w: 160, label: 'Levels', icon: 'none', group: 'main' },
+  daily: { x: 468, w: 140, label: 'Daily', icon: 'none', group: 'main' },
+  harp: { x: 616, w: 140, label: 'Harp', icon: 'none', group: 'main' },
+  next: { x: 779, w: 170, label: 'Next', icon: 'none', group: 'main' },
+  options: { x: 922, w: 100, label: '', icon: 'gear', group: 'main' },
+  // Options row.
+  'opt-hold': { x: 177, w: 250, label: 'Hold to freeze: Off', icon: 'none', group: 'options' },
+  'opt-onehand': { x: 410, w: 200, label: 'One hand: Off', icon: 'none', group: 'options' },
+  'opt-raise': { x: 568, w: 100, label: 'Raise', icon: 'none', group: 'options' },
+  'opt-lower': { x: 676, w: 100, label: 'Lower', icon: 'none', group: 'options' },
+  recenter: { x: 789, w: 110, label: 'Center', icon: 'none', group: 'options' },
+  'opt-done': { x: 912, w: 120, label: 'Done', icon: 'none', group: 'options' },
+  // Level picker row.
+  'lvl-1': { x: 97, w: 90, label: 'I', icon: 'none', group: 'levels' },
+  'lvl-2': { x: 197, w: 90, label: 'II', icon: 'none', group: 'levels' },
+  'lvl-3': { x: 297, w: 90, label: 'III', icon: 'none', group: 'levels' },
+  'lvl-4': { x: 397, w: 90, label: 'IV', icon: 'none', group: 'levels' },
+  'lvl-5': { x: 497, w: 90, label: 'V', icon: 'none', group: 'levels' },
+  'lvl-6': { x: 597, w: 90, label: 'VI', icon: 'none', group: 'levels' },
+  'lvl-7': { x: 697, w: 90, label: 'VII', icon: 'none', group: 'levels' },
+  'lvl-8': { x: 797, w: 90, label: 'VIII', icon: 'none', group: 'levels' },
+  'lvl-back': { x: 912, w: 120, label: 'Back', icon: 'none', group: 'levels' },
 };
 const BUTTON_Y = 474;
 const BUTTON_Z = 0.004;
@@ -396,6 +428,12 @@ export class Hud {
     ctx.font = `600 70px ${SERIF}`;
     ctx.fillText(state.title, left, 160);
 
+    if (state.levelList) {
+      this.drawLevelList(ctx, state.levelList, left, right);
+      this.texture.needsUpdate = true;
+      return;
+    }
+
     // Tip, up to two lines.
     ctx.fillStyle = INK_SOFT;
     ctx.font = `italic 31px ${SERIF}`;
@@ -449,6 +487,46 @@ export class Hud {
 
     if (state.solved) this.stamp(ctx, right - 76, 228);
     this.texture.needsUpdate = true;
+  }
+
+  /** Two columns of levels: numeral, title and best stars; current one marked. */
+  private drawLevelList(
+    ctx: CanvasRenderingContext2D,
+    list: LevelEntry[],
+    left: number,
+    right: number,
+  ) {
+    const colW = (right - left) / 2;
+    list.forEach((entry, i) => {
+      const col = Math.floor(i / 4);
+      const row = i % 4;
+      const x = left + col * colW;
+      const y = 214 + row * 52;
+      if (entry.current) {
+        ctx.fillStyle = 'rgba(201,157,79,0.22)';
+        roundRect(ctx, x - 12, y - 34, colW - 16, 46, 8);
+        ctx.fill();
+      }
+      ctx.textAlign = 'left';
+      ctx.fillStyle = BRASS;
+      ctx.font = `700 22px ${SANS}`;
+      spaced(ctx, 2);
+      ctx.fillText(entry.numeral, x, y);
+      spaced(ctx, 0);
+      ctx.fillStyle = INK;
+      ctx.font = `600 30px ${SERIF}`;
+      ctx.fillText(entry.title, x + 62, y);
+      for (let s = 0; s < 3; s++) {
+        starPath(ctx, x + colW - 96 + s * 26, y - 10, 10);
+        if (s < entry.stars) {
+          ctx.fillStyle = BRASS_LIGHT;
+          ctx.fill();
+        }
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = BRASS;
+        ctx.stroke();
+      }
+    });
   }
 
   /** A slightly crooked ink stamp, like a seal on a solved page. */
