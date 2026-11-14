@@ -1,11 +1,5 @@
-/**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
 import { defineComponents } from '@iwsdk/core';
-import { Robot } from './robot-component.js';
 
-export default defineComponents([Robot]);
+// Palm Prism keeps its game state inside PrismGameSystem, so it declares no
+// custom ECS components yet. Add them here when scenes need to author them.
+export default defineComponents([]);

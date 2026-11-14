@@ -1,0 +1,203 @@
+/**
+ * Palm Prism level data, in board-local metres.
+ *
+ * Board space: the board's top surface is y = 0, its radius is about 0.24 m,
+ * and +Z points toward the player. Keep every crystal within reach of a seated
+ * player (|x|,|z| <= 0.24, 0.05 <= y <= 0.4).
+ *
+ * Crystal kinds:
+ *  - `stay`  (gold): charge it once and it stays lit for the rest of the level.
+ *  - `pulse` (blue): glows only while light flows through it. Every pulse
+ *    crystal must be lit at the same moment.
+ */
+
+export type Vec3 = [number, number, number];
+
+export type CrystalKind = 'stay' | 'pulse';
+
+export interface CrystalDef {
+  pos: Vec3;
+  /** Index into the pentatonic scale in audio.ts. */
+  note: number;
+  kind: CrystalKind;
+}
+
+export interface BlockerDef {
+  min: Vec3;
+  max: Vec3;
+}
+
+export interface LevelDef {
+  id: string;
+  title: string;
+  /** One short line shown on the HUD. No walls of text. */
+  tip: string;
+  emitter: { pos: Vec3; dir: Vec3 };
+  crystals: CrystalDef[];
+  blockers: BlockerDef[];
+  /** Mirrors the player may freeze in this level. */
+  freezes: number;
+  /** Freezes used for a 3-star clear. */
+  par: number;
+  /** Ghost mirror shown until the first crystal lights (onboarding). */
+  hint?: { center: Vec3; toward: Vec3 };
+  /**
+   * Known solutions, used only by scripts/verify-levels.ts. Each entry is a
+   * beam path: mirror centres in order, then a far point the last bounce aims
+   * at. Several entries mean the crystals can be lit one path at a time
+   * (only valid when every crystal is `stay`).
+   */
+  solutions: Vec3[][];
+}
+
+export const LEVELS: LevelDef[] = [
+  {
+    id: 'first-light',
+    title: 'First Light',
+    tip: 'Hold your palm over the light, then tilt it.',
+    emitter: { pos: [0, 0.015, 0], dir: [0, 1, 0] },
+    crystals: [{ pos: [0.17, 0.2, -0.06], note: 0, kind: 'stay' }],
+    blockers: [],
+    freezes: 0,
+    par: 0,
+    hint: { center: [0, 0.2, 0], toward: [0.17, 0.2, -0.06] },
+    solutions: [[[0, 0.2, 0], [0.34, 0.2, -0.12]]],
+  },
+  {
+    id: 'two-notes',
+    title: 'Two Notes',
+    tip: 'Tilt your palm to aim. Light every crystal.',
+    emitter: { pos: [0, 0.015, 0.03], dir: [0, 1, 0] },
+    crystals: [
+      { pos: [-0.16, 0.17, -0.05], note: 1, kind: 'stay' },
+      { pos: [0.15, 0.25, -0.1], note: 3, kind: 'stay' },
+    ],
+    blockers: [],
+    freezes: 0,
+    par: 0,
+    hint: { center: [0, 0.17, 0.03], toward: [-0.16, 0.17, -0.05] },
+    solutions: [
+      [[0, 0.17, 0.03], [-0.32, 0.17, -0.13]],
+      [[0, 0.25, 0.03], [0.3, 0.25, -0.23]],
+    ],
+  },
+  {
+    id: 'side-light',
+    title: 'Side Light',
+    tip: 'Light can come from the side. Turn your palm to face it.',
+    emitter: { pos: [-0.22, 0.12, 0.04], dir: [1, 0, 0] },
+    crystals: [
+      { pos: [0.02, 0.3, -0.14], note: 2, kind: 'stay' },
+      { pos: [0.16, 0.05, -0.16], note: 4, kind: 'stay' },
+    ],
+    blockers: [],
+    freezes: 0,
+    par: 0,
+    solutions: [
+      [[0.05, 0.12, 0.04], [-0.01, 0.48, -0.32]],
+      [[0.12, 0.12, 0.04], [0.2, -0.02, -0.36]],
+    ],
+  },
+  {
+    id: 'over-the-wall',
+    title: 'Over the Wall',
+    tip: 'Blocked? Use both hands. Each palm is a mirror.',
+    emitter: { pos: [0.13, 0.015, 0.05], dir: [0, 1, 0] },
+    crystals: [{ pos: [-0.15, 0.08, 0], note: 5, kind: 'stay' }],
+    blockers: [{ min: [-0.025, 0, -0.14], max: [0.005, 0.3, 0.14] }],
+    freezes: 0,
+    par: 0,
+    solutions: [[[0.13, 0.36, 0.05], [-0.15, 0.36, 0], [-0.15, -0.2, 0]]],
+  },
+  {
+    id: 'hold-the-light',
+    title: 'Hold the Light',
+    tip: 'Blue crystals glow only while light flows. Light both at once.',
+    emitter: { pos: [0, 0.015, 0.06], dir: [0, 1, 0] },
+    crystals: [
+      { pos: [-0.12, 0.22, 0.06], note: 0, kind: 'pulse' },
+      { pos: [-0.2, 0.22, -0.12], note: 2, kind: 'pulse' },
+    ],
+    blockers: [],
+    freezes: 1,
+    par: 0,
+    solutions: [[[0, 0.22, 0.06], [-0.24, 0.22, 0.06], [-0.16, 0.22, -0.3]]],
+  },
+  {
+    id: 'three-notes',
+    title: 'Three Notes',
+    tip: 'Three mirrors, two hands. Pinch to freeze one in place.',
+    emitter: { pos: [0.16, 0.015, 0.1], dir: [0, 1, 0] },
+    crystals: [
+      { pos: [0, 0.3, 0.1], note: 1, kind: 'pulse' },
+      { pos: [-0.16, 0.3, -0.03], note: 3, kind: 'pulse' },
+      { pos: [0, 0.19, -0.16], note: 5, kind: 'pulse' },
+    ],
+    blockers: [],
+    freezes: 1,
+    par: 1,
+    solutions: [
+      [
+        [0.16, 0.3, 0.1],
+        [-0.16, 0.3, 0.1],
+        [-0.16, 0.3, -0.16],
+        [0.48, -0.14, -0.16],
+      ],
+    ],
+  },
+  {
+    id: 'around-the-pillar',
+    title: 'Around the Pillar',
+    tip: 'Bend the light around the pillar.',
+    emitter: { pos: [-0.22, 0.1, 0.1], dir: [1, 0, 0] },
+    crystals: [
+      { pos: [0.12, 0.1, 0.1], note: 4, kind: 'pulse' },
+      { pos: [-0.12, 0.18, -0.17], note: 1, kind: 'pulse' },
+    ],
+    blockers: [{ min: [-0.04, 0, -0.09], max: [0.04, 0.3, -0.01] }],
+    freezes: 1,
+    par: 0,
+    solutions: [
+      [
+        [0.2, 0.1, 0.1],
+        [0.2, 0.1, -0.17],
+        [-0.44, 0.26, -0.17],
+      ],
+    ],
+  },
+  {
+    id: 'constellation',
+    title: 'Constellation',
+    tip: 'Four stars. Build the path one frozen mirror at a time.',
+    emitter: { pos: [0.18, 0.015, -0.12], dir: [0, 1, 0] },
+    crystals: [
+      { pos: [0, 0.26, -0.12], note: 0, kind: 'pulse' },
+      { pos: [-0.18, 0.26, 0], note: 2, kind: 'pulse' },
+      { pos: [-0.03, 0.19, 0.12], note: 4, kind: 'pulse' },
+      { pos: [0.12, 0.22, 0.02], note: 6, kind: 'pulse' },
+    ],
+    blockers: [],
+    freezes: 2,
+    par: 2,
+    solutions: [
+      [
+        [0.18, 0.26, -0.12],
+        [-0.18, 0.26, -0.12],
+        [-0.18, 0.26, 0.12],
+        [0.12, 0.12, 0.12],
+        [0.12, 0.42, -0.18],
+      ],
+    ],
+  },
+];
+
+/** Visual radius of a crystal. */
+export const CRYSTAL_RADIUS = 0.028;
+/** Extra forgiveness so a beam that grazes a crystal still counts. */
+export const CRYSTAL_AIM_ASSIST = 0.016;
+/** Radius of a palm or frozen mirror. */
+export const MIRROR_RADIUS = 0.075;
+/** Seconds of light a gold crystal needs before it stays lit. */
+export const CHARGE_SECONDS = 0.6;
+/** Seconds every blue crystal must glow together to clear the level. */
+export const HOLD_SECONDS = 0.5;

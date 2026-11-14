@@ -1,18 +1,30 @@
 <!--
-  Panel, Button, ButtonIcon, and ButtonLabel come from the bundled Horizon kit.
-  RectangleGoggles and LogIn are bundled Lucide icon components. The :dark
-  styles apply because iwsdk.config.json prefers the dark color scheme.
+  Browser landing panel. Panel, Button, ButtonIcon and ButtonLabel come from
+  the bundled Horizon kit; RectangleGoggles, LogIn and Sparkles are Lucide
+  icons. The :dark styles apply because iwsdk.config.json prefers dark.
 -->
 <style>
   .panel-root {
     flex-direction: column;
-    width: 420px;
+    width: 440px;
   }
 
   .panel-content {
     flex-direction: column;
-    gap: 7px;
-    padding: 22px;
+    gap: 8px;
+    padding: 24px;
+  }
+
+  .eyebrow-row {
+    flex-direction: row;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .eyebrow-icon {
+    width: 18px;
+    height: 18px;
+    color: #f5d90a;
   }
 
   .eyebrow {
@@ -28,9 +40,8 @@
 
   .heading {
     color: #1c1d20;
-    font-size: 30px;
+    font-size: 32px;
     font-weight: 700;
-    line-height: 36px;
   }
 
   .heading:dark {
@@ -39,8 +50,7 @@
 
   .body {
     color: #3a3b40;
-    font-size: 20px;
-    line-height: 27px;
+    font-size: 19px;
   }
 
   .body:dark {
@@ -49,9 +59,9 @@
 
   .button {
     justify-content: flex-start;
-    margin-left: 22px;
-    margin-right: 22px;
-    margin-bottom: 22px;
+    margin-left: 24px;
+    margin-right: 24px;
+    margin-bottom: 24px;
   }
 
   .button-label {
@@ -60,16 +70,19 @@
 </style>
 <Panel class="panel-root">
   <div class="panel-content">
-    <div class="eyebrow">IMMERSIVE WEB SDK</div>
-    <div class="heading">Hello, Immersive Web!</div>
-    <div class="body">Try each station around you,</div>
-    <div class="body">then make this scene your own.</div>
+    <div class="eyebrow-row">
+      <Sparkles class="eyebrow-icon"></Sparkles>
+      <div class="eyebrow">PALM PRISM</div>
+    </div>
+    <div class="heading">Your hands are the mirrors.</div>
+    <div class="body">Bend light with your palms to wake every crystal.</div>
+    <div class="body">Pinch to freeze a mirror in place. No controllers needed.</div>
   </div>
   <Button id="xr-button" class="button">
     <ButtonIcon>
       <RectangleGoggles></RectangleGoggles>
     </ButtonIcon>
-    <ButtonLabel class="button-label">Enter XR</ButtonLabel>
+    <ButtonLabel class="button-label">Enter VR</ButtonLabel>
   </Button>
   <Button id="exit-button" class="button" style="display: none">
     <ButtonIcon>

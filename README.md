@@ -1,45 +1,78 @@
-# IWSDK App
+# Palm Prism
 
-This project uses `iwsdk.config.json` for declarative scene, asset, component,
-XR, and emulator configuration. Application systems remain explicit in
-`src/index.ts`.
+**Your hands are the mirrors.** A hands-first VR puzzle game for Meta Quest,
+built with the Immersive Web SDK (WebXR) for the Meta VR Start Developer
+Competition 2026 (Gaming track, New Experience division).
+
+A beam of light rises from a small floating board. Hold your palm in the beam
+and tilt it: your hand reflects the light. Guide it through crystals to make
+them sing. Pinch to freeze a mirror where your hand was, then use that hand
+again. No controllers needed.
+
+## Run it
 
 ```sh
 npm install
 npm run dev
 ```
 
-Use the Runtime and Editor controls in the managed browser to switch between
-the running experience and its authored scene.
+`npm run dev` starts the dev server at `https://localhost:8081` and opens a
+managed browser with the IWER emulator (a simulated Quest 3). Stop it with
+`npm run dev:down`.
 
-## Starter content
+**On a Quest:** connect the headset to the same Wi-Fi, open the `Network` URL
+printed by `npx @iwsdk/cli dev status` in Quest Browser, accept the local
+certificate warning, then press **Enter VR**.
 
-The robot and welcome panel are small examples of authored scene content plus
-runtime systems. The robot turns toward the player's head and plays a sound
-when pressed. To remove the robot, delete its scene node, its `RobotSystem`
-registration from `src/index.ts` or `src/index.js`, and its `Robot` registration
-from `src/components.ts` or `src/components.js`; you can then delete the unused
-robot component and system files. To remove the welcome panel, delete its scene
-node and its `PanelSystem` registration from the application entry point.
+## How to play
 
-The robot stands on the second of three numbered stations. The first holds dark
-pieces you can grab and move, and the third holds a ring you can spin in place.
-The studio props (the plinths and the dark pieces, plus the floor and stage in VR
-and Desktop 3D) are built in code in `src/scene-assets/studio.scene-asset.ts` or
-`.js`. The VR and Desktop 3D background furniture is built the same way in
-`src/scene-assets/decor.scene-asset.ts` or `.js`, so the starter downloads no
-extra models. To remove any of them, delete their scene nodes and their entries
-in `src/assets.ts` or `src/assets.js`, then delete the files you no longer use.
-The station labels are `public/ui/label-*.uikitml`.
+| Action | How |
+| --- | --- |
+| Reflect light | Hold a palm in the beam; tilt to aim. Both palms work. |
+| Freeze a mirror | Pinch while your palm is over the board. Limited per level. |
+| Gold crystal | Hold light on it briefly; it stays lit. |
+| Blue crystal | Glows only while light flows through it. Light every blue crystal at once. |
+| Reset / Recenter / Next | Point at the panel behind the board and pinch. |
 
-The rest of the look is built-in components in the scene, which you can edit in
-the editor without code. The soft light on every object is the scene root's
-`IBLGradient` (select the Level Root to edit it), and the soft shadows under
-each object are `ContactShadow` nodes. In VR and Desktop 3D, the sky is the
-scene root's `DomeGradient` (its colors, tilt and dither are also on the Level
-Root), and the floor fades into it through the `DomeFade` on the floor node. AR
-projects have no sky or floor, so passthrough stays visible, and a
-`ShadowCatcher` node grounds the stations.
+Stars: clear a level within its freeze par for 3 stars. Every star you earn
+adds a star to your sky, and clearing a level each day grows your streak.
 
-- Minimal scene walkthrough: https://iwsdk.dev/guides/01b-minimal-scene.html
-- XR-enabled projects — IWER emulator controls: https://iwsdk.dev/guides/02-testing-experience.html#iwer-controls
+## Dev shortcuts (dev server only)
+
+Press **N** (next level), **P** (previous) or **R** (reset) in the browser
+window. Useful for testing and for recording the demo video.
+
+## Project layout
+
+| File | What it does |
+| --- | --- |
+| `src/prism-game.ts` | Main game system: palms to mirrors, beam, crystals, freezes, level flow, HUD |
+| `src/beam.ts` | Pure beam-tracing math (no Three.js), shared with the level checker |
+| `src/levels.ts` | The 8 levels plus a known solution for each |
+| `src/prism-visuals.ts` | Procedural board, crystals, beam, mirrors, sky and floor |
+| `src/audio.ts` | Generated sounds (no audio files) |
+| `src/progress.ts` | Unlocks, stars and daily streak in localStorage |
+| `public/ui/hud.uikitml` | In-headset HUD panel |
+| `public/ui/welcome.uikitml` | Browser landing panel |
+| `scripts/verify-levels.ts` | Proves every level is solvable with the real tracer |
+
+## Checks
+
+```sh
+npm run typecheck
+node scripts/verify-levels.ts
+npm run build
+```
+
+## Adding a level
+
+Add an entry to `LEVELS` in `src/levels.ts` (board-local metres: top surface
+is y = 0, radius about 0.24, +Z toward the player) with at least one entry in
+`solutions`, then run `node scripts/verify-levels.ts`.
+
+## Deploy (for judges)
+
+`npm run build` writes a static site to `dist/`. Host it on GitHub Pages,
+Vercel or any static host over HTTPS; see
+https://iwsdk.dev/guides/02-testing-experience.html and the IWSDK hosting
+guide.
