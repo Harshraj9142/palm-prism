@@ -50,7 +50,9 @@ import {
   type CrystalDef,
   type LevelDef,
 } from './levels.js';
+import type { Mesh as ThreeMesh, MeshBasicMaterial as BasicMat } from '@iwsdk/core';
 import { PrismButton } from './prism-button.js';
+import { buildNightEnvironment } from './realism.js';
 import {
   BeamRenderer,
   BurstPool,
@@ -62,6 +64,7 @@ import {
   createFloor,
   createMirrorVisual,
   createSky,
+  createSpill,
   DustMotes,
   orientAlong,
   placeMirror,
@@ -157,6 +160,8 @@ interface CrystalState {
   glowing: boolean;
   lastPing: number;
   intensity: number;
+  /** Coloured light this crystal throws onto the board below it. */
+  spill: ThreeMesh;
 }
 
 function makeMirror(): MirrorDisc {
@@ -282,6 +287,8 @@ export class PrismGameSystem extends createSystem({
   private euler = new Euler(0, 0, 0, 'YXZ');
 
   init(): void {
+    // Reflections for brass, glass and stone; must exist before materials.
+    buildNightEnvironment(this.world.renderer);
     this.progress = loadProgress();
     this.settings = loadSettings();
 
@@ -691,7 +698,12 @@ export class PrismGameSystem extends createSystem({
       visual.group.position.set(c.pos[0], c.pos[1], c.pos[2]);
       visual.group.scale.setScalar(0.001);
       this.levelGroup.add(visual.group);
+      const spill = createSpill(c.kind === 'stay' ? COLORS.gold : COLORS.blue, 0.2, 0);
+      spill.position.set(c.pos[0], 0.0016, c.pos[2]);
+      spill.visible = Math.hypot(c.pos[0], c.pos[2]) < 0.26;
+      this.levelGroup.add(spill);
       return {
+        spill,
         def: c,
         target: {
           x: c.pos[0],
@@ -725,6 +737,9 @@ export class PrismGameSystem extends createSystem({
 
     const e = level.emitter;
     this.emitter.position.set(e.pos[0], e.pos[1], e.pos[2]);
+    const pool = this.boardParts.lampPool;
+    pool.position.set(e.pos[0], 0.0015, e.pos[2]);
+    pool.visible = Math.hypot(e.pos[0], e.pos[2]) < 0.24;
     this.emitterDir.set(e.dir[0], e.dir[1], e.dir[2]).normalize();
     orientAlong(this.emitter, this.emitterDir);
     const inDir: [number, number, number] = [
@@ -1104,6 +1119,20 @@ export class PrismGameSystem extends createSystem({
     this.beam.update(this.trace.points, this.trace.pointCount, this.trace.mirrorAtPoint, time);
     this.dust.update(this.trace.points, this.trace.pointCount, time);
 
+    // Where the beam strikes the board, the slate lights up.
+    const last = this.trace.pointCount - 1;
+    const hx = this.trace.points[last * 3];
+    const hy = this.trace.points[last * 3 + 1];
+    const hz = this.trace.points[last * 3 + 2];
+    const hot = this.boardParts.hotspot;
+    hot.visible =
+      this.trace.mirrorAtPoint[last] < 0 && Math.abs(hy) < 0.004 && Math.hypot(hx, hz) < 0.25;
+    if (hot.visible) hot.position.set(hx, 0.0017, hz);
+
+    // A lamp breathes a little, like a flame behind glass.
+    const flicker = 0.3 + Math.sin(time * 7.3) * 0.02 + Math.sin(time * 13.1) * 0.015;
+    (this.boardParts.lampPool.material as BasicMat).opacity = flicker;
+
     for (let i = 0; i < 2; i++) {
       const p = i === 0 ? this.palms.left : this.palms.right;
       const hit = this.trace.mirrorHit[i] === 1;
@@ -1187,6 +1216,7 @@ export class PrismGameSystem extends createSystem({
       c.intensity += (target - c.intensity) * Math.min(1, dt * 10);
       c.visual.material.emissiveIntensity = c.intensity;
       c.visual.halo.material.opacity = Math.min(1, 0.06 + c.intensity * 0.28);
+      (c.spill.material as BasicMat).opacity = Math.min(0.55, Math.max(0, (c.intensity - 0.3) * 0.2));
       const charging = c.def.kind === 'stay' && !c.lit && c.charge > 0;
       const pulse = charging ? 1 + Math.sin(time * 18) * 0.06 : 1;
       c.visual.group.scale.setScalar(appear * pulse);

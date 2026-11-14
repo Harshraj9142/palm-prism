@@ -70,6 +70,7 @@ Useful for testing and for recording the demo video.
 | `src/beam.ts` | Pure beam-tracing math (no Three.js), shared with the level checker |
 | `src/levels.ts` | The 8 levels and the Light Harp, each with a known solution |
 | `src/daily.ts` | Daily Prism generator (seeded by date, self-validating) |
+| `src/realism.ts` | Generated night-room reflections, brushed brass, engraved slate, glass and obsidian materials, light spill, turned pedestal, flagstone floor, Milky Way and moon |
 | `src/prism-visuals.ts` | Night-observatory look: brass astrolabe board, lamplight beam with dust, crystals, mirrors, sky with your constellation, floor |
 | `src/audio.ts` | Generated sounds (no audio files) |
 | `src/progress.ts` | Unlocks, stars and daily streak in localStorage |

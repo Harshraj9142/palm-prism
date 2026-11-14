@@ -7,7 +7,9 @@
  * Materials are unlit and skip tone mapping, so the paper and ink colours
  * reach the headset exactly as designed.
  */
+import { brassMaterial } from './realism.js';
 import {
+  BoxGeometry,
   CanvasTexture,
   Group,
   Mesh,
@@ -261,6 +263,15 @@ export class Hud {
     );
     card.name = 'HudCard';
     this.root.add(card);
+    // A brass backing plate gives the card real thickness and an edge that
+    // catches the light.
+    const plate = new Mesh(
+      new BoxGeometry(CARD_METERS_W + 0.016, CARD_METERS_H + 0.016, 0.006),
+      brassMaterial('bright'),
+    );
+    plate.position.z = -0.0035;
+    plate.name = 'HudPlate';
+    this.root.add(plate);
 
     for (const action of Object.keys(BUTTON_LAYOUT) as HudAction[]) {
       const spec = BUTTON_LAYOUT[action];

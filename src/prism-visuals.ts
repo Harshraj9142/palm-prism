@@ -40,6 +40,18 @@ import {
   Vector3,
 } from '@iwsdk/core';
 import { MAX_BOUNCES } from './beam.js';
+import {
+  brassMaterial,
+  createMilkyWay,
+  createMoon,
+  createSpill,
+  createStoneFloor,
+  getEnvMap,
+  glassMaterial,
+  obsidianMaterial,
+  pedestalCapital,
+  pedestalFoot,
+} from './realism.js';
 import { CRYSTAL_RADIUS, MIRROR_RADIUS, type CrystalKind } from './levels.js';
 
 export const COLORS = {
@@ -137,27 +149,32 @@ function getRingTexture(): CanvasTexture {
 
 // ------------------------------------------------------------------ Board
 
-/** Slate face of the astrolabe: etched rings, degree ticks, hour numerals. */
-function drawBoardFace(): CanvasTexture {
+/**
+ * Slate face of the astrolabe: etched rings, degree ticks, hour numerals.
+ * Drawn twice: once in colour, once as a bump map where the engraving is cut
+ * into the stone.
+ */
+function drawBoardFace(bump = false): CanvasTexture {
   const size = 1024;
   const [canvas, ctx] = makeCanvas(size);
   const c = size / 2;
   const g = ctx.createRadialGradient(c, c * 0.9, 0, c, c, c);
-  g.addColorStop(0, '#2a2d33');
-  g.addColorStop(1, '#16181d');
+  g.addColorStop(0, bump ? '#808080' : '#2a2d33');
+  g.addColorStop(1, bump ? '#808080' : '#16181d');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
 
   // Fine stone grain.
   const rand = seeded(11);
   for (let i = 0; i < 9000; i++) {
-    const a = rand() * 0.06;
+    const a = rand() * (bump ? 0.18 : 0.06);
     ctx.fillStyle = rand() < 0.5 ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a * 1.5})`;
     ctx.fillRect(rand() * size, rand() * size, 1.5, 1.5);
   }
 
+  const ink = (alpha: number) => (bump ? `rgba(20,20,20,${Math.min(1, alpha * 1.6)})` : `rgba(214,178,112,${alpha})`);
   const etch = (r: number, width: number, alpha: number) => {
-    ctx.strokeStyle = `rgba(214,178,112,${alpha})`;
+    ctx.strokeStyle = ink(alpha);
     ctx.lineWidth = width;
     ctx.beginPath();
     ctx.arc(c, c, r, 0, Math.PI * 2);
@@ -175,7 +192,7 @@ function drawBoardFace(): CanvasTexture {
     const mid = i % 10 === 0;
     const r1 = c * 0.96;
     const r0 = r1 - (long ? 30 : mid ? 20 : 11);
-    ctx.strokeStyle = `rgba(214,178,112,${long ? 0.6 : mid ? 0.4 : 0.25})`;
+    ctx.strokeStyle = ink(long ? 0.6 : mid ? 0.4 : 0.25);
     ctx.lineWidth = long ? 2.4 : 1.2;
     ctx.beginPath();
     ctx.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0);
@@ -185,7 +202,7 @@ function drawBoardFace(): CanvasTexture {
 
   // Hour numerals, like the rim of an astrolabe.
   const numerals = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
-  ctx.fillStyle = 'rgba(214,178,112,0.5)';
+  ctx.fillStyle = ink(0.5);
   ctx.font = '600 26px Georgia, "Noto Serif", serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -200,7 +217,7 @@ function drawBoardFace(): CanvasTexture {
   });
 
   // A faint compass rose at the centre.
-  ctx.strokeStyle = 'rgba(214,178,112,0.16)';
+  ctx.strokeStyle = ink(0.16);
   ctx.lineWidth = 1.2;
   for (let i = 0; i < 16; i++) {
     const a = (i / 16) * Math.PI * 2;
@@ -210,7 +227,9 @@ function drawBoardFace(): CanvasTexture {
     ctx.lineTo(c + Math.cos(a) * r, c + Math.sin(a) * r);
     ctx.stroke();
   }
-  return canvasTexture(canvas);
+  const texture = canvasTexture(canvas);
+  if (bump) texture.colorSpace = '';
+  return texture;
 }
 
 export interface Board {
@@ -219,6 +238,10 @@ export interface Board {
   rune: MeshBasicMaterial;
   /** Stretch the brass stem so it reaches the floor from `heightAboveFloor`. */
   setStemHeight(heightAboveFloor: number): void;
+  /** Warm pool of lamplight on the slate around the lamp. */
+  lampPool: Mesh;
+  /** Bright spot where the beam strikes the board. */
+  hotspot: Mesh;
 }
 
 /** Slate-and-brass astrolabe on a stem. Its top surface is at local y = 0. */
@@ -226,21 +249,23 @@ export function createBoard(): Board {
   const group = new Group();
   group.name = 'PrismBoard';
 
-  const brass = new MeshStandardMaterial({
-    color: COLORS.brass,
-    metalness: 0.85,
-    roughness: 0.32,
+  const brass = brassMaterial('bright');
+  const darkBrass = brassMaterial('dark');
+  const env = getEnvMap();
+  const slateSide = new MeshStandardMaterial({
+    color: '#1a1c21',
+    roughness: 0.6,
+    envMap: env,
+    envMapIntensity: 0.5,
   });
-  const darkBrass = new MeshStandardMaterial({
-    color: '#6e5426',
-    metalness: 0.8,
-    roughness: 0.45,
-  });
-  const slateSide = new MeshStandardMaterial({ color: '#1a1c21', roughness: 0.7 });
   const face = new MeshStandardMaterial({
     map: drawBoardFace(),
-    roughness: 0.65,
+    bumpMap: drawBoardFace(true),
+    bumpScale: 1.2,
+    roughness: 0.55,
     metalness: 0.05,
+    envMap: env,
+    envMapIntensity: 0.55,
   });
 
   const slab = new Mesh(new CylinderGeometry(0.25, 0.25, 0.026, 96), [
@@ -266,39 +291,40 @@ export function createBoard(): Board {
   inlay.position.y = 0.0008;
   group.add(inlay);
 
-  // Underside collar, stem and foot.
-  const collar = new Mesh(new CylinderGeometry(0.06, 0.03, 0.04, 48), darkBrass);
-  collar.position.y = -0.046;
-  group.add(collar);
-  const stem = new Mesh(new CylinderGeometry(0.011, 0.014, 1, 24), darkBrass);
+  // Turned brass pedestal: capital, shaft and foot.
+  group.add(new Mesh(pedestalCapital(), darkBrass));
+  const stem = new Mesh(new CylinderGeometry(0.0145, 0.0145, 1, 24, 1, true), darkBrass);
   group.add(stem);
-  const foot = new Mesh(new CylinderGeometry(0.1, 0.13, 0.025, 64), darkBrass);
+  const foot = new Mesh(pedestalFoot(), darkBrass);
   group.add(foot);
 
   const setStemHeight = (h: number) => {
-    const top = 0.066;
-    const length = Math.max(0.05, h - top);
+    const top = 0.13;
+    const footHeight = 0.1;
+    const length = Math.max(0.02, h - top - footHeight);
     stem.scale.y = length;
     stem.position.y = -top - length / 2;
-    foot.position.y = -h + 0.0125;
+    foot.position.y = -h;
   };
   setStemHeight(1);
-  return { group, rune: runeMaterial, setStemHeight };
+
+  const lampPool = createSpill(COLORS.beamGlow, 0.34, 0.32);
+  lampPool.position.y = 0.0015;
+  group.add(lampPool);
+  const hotspot = createSpill(COLORS.beamCore, 0.09, 0.7);
+  hotspot.position.y = 0.0017;
+  hotspot.visible = false;
+  group.add(hotspot);
+  return { group, rune: runeMaterial, setStemHeight, lampPool, hotspot };
 }
 
 /** Brass lamp. Its lens sits at the group origin and fires along +Y. */
 export function createEmitter(): Group {
   const group = new Group();
-  const body = new Mesh(
-    new CylinderGeometry(0.013, 0.02, 0.026, 24),
-    new MeshStandardMaterial({ color: COLORS.brass, metalness: 0.85, roughness: 0.3 }),
-  );
+  const body = new Mesh(new CylinderGeometry(0.013, 0.02, 0.026, 32), brassMaterial('bright'));
   body.position.y = -0.014;
   group.add(body);
-  const collar = new Mesh(
-    new TorusGeometry(0.0125, 0.0025, 8, 32),
-    new MeshStandardMaterial({ color: '#7a5c26', metalness: 0.8, roughness: 0.4 }),
-  );
+  const collar = new Mesh(new TorusGeometry(0.0125, 0.0025, 10, 40), brassMaterial('dark'));
   collar.rotation.x = Math.PI / 2;
   group.add(collar);
   const lens = new Mesh(
@@ -323,6 +349,8 @@ export interface CrystalVisual {
   halo: Sprite;
 }
 
+export { createSpill };
+
 /**
  * Cut-glass crystal. The shape follows the note and teal crystals wear a
  * brass ring, so colour is never the only cue (accessibility).
@@ -337,22 +365,12 @@ export function createCrystal(kind: CrystalKind, note: number): CrystalVisual {
   ];
   const geometry = shapes[note % shapes.length]();
   const color = kind === 'stay' ? COLORS.gold : COLORS.blue;
-  const material = new MeshStandardMaterial({
-    color: kind === 'stay' ? COLORS.goldDim : COLORS.blueDim,
-    emissive: color,
-    emissiveIntensity: 0.25,
-    roughness: 0.08,
-    metalness: 0.2,
-    flatShading: true,
-  });
+  const material = glassMaterial(kind === 'stay' ? COLORS.goldDim : COLORS.blueDim, color);
   const mesh = new Mesh(geometry, material);
   const group = new Group();
   group.add(mesh);
   if (kind === 'pulse') {
-    const ring = new Mesh(
-      new TorusGeometry(r * 1.5, 0.0013, 6, 48),
-      new MeshStandardMaterial({ color: COLORS.brass, metalness: 0.8, roughness: 0.3 }),
-    );
+    const ring = new Mesh(new TorusGeometry(r * 1.5, 0.0014, 8, 56), brassMaterial('bright'));
     ring.rotation.x = Math.PI / 2;
     group.add(ring);
   }
@@ -370,12 +388,7 @@ export function createBlocker(
   const sz = max[2] - min[2];
   const geometry = new BoxGeometry(sx, sy, sz);
   const group = new Group();
-  group.add(
-    new Mesh(
-      geometry,
-      new MeshStandardMaterial({ color: '#121418', roughness: 0.85, metalness: 0.1 }),
-    ),
-  );
+  group.add(new Mesh(geometry, obsidianMaterial()));
   group.add(
     new LineSegments(
       new EdgesGeometry(geometry),
@@ -723,6 +736,9 @@ export function createSky(): Sky {
   };
   group.add(starField(rand, 1400, 0.28, 0.55, band));
 
+  group.add(createMilkyWay());
+  group.add(createMoon());
+
   // The player's constellation, rising in front of them.
   const EARNED_MAX = 60;
   const earnedRand = seeded(7);
@@ -772,8 +788,13 @@ export function createSky(): Sky {
   };
 }
 
-/** Dark floor engraved like a planisphere, so a seated player feels grounded. */
+/** Flagstone floor with a warm light pool (see realism.ts). */
 export function createFloor(): Mesh {
+  return createStoneFloor();
+}
+
+/** Earlier planisphere floor, kept for reference. */
+export function createPlanisphereFloor(): Mesh {
   const size = 1024;
   const [canvas, ctx] = makeCanvas(size);
   const c = size / 2;

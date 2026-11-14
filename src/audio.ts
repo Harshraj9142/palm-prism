@@ -10,6 +10,8 @@ export class PrismAudio {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private droneGain: GainNode | null = null;
+  /** Bells and chimes go through here: dry to the speakers plus a room reverb. */
+  private voice: GainNode | null = null;
 
   /** Create or resume the context. Call from a user gesture or XR entry. */
   ensure(): void {
@@ -24,12 +26,36 @@ export class PrismAudio {
         this.master = this.ctx.createGain();
         this.master.gain.value = 0.7;
         this.master.connect(this.ctx.destination);
+        this.voice = this.createRoom(this.ctx, this.master);
         this.startDrone();
       }
       if (this.ctx.state === 'suspended') void this.ctx.resume();
     } catch {
       // Audio is optional; the game works silently.
     }
+  }
+
+  /** A generated impulse response: a small stone room with a soft tail. */
+  private createRoom(ctx: AudioContext, out: GainNode): GainNode {
+    const voice = ctx.createGain();
+    voice.connect(out);
+    const seconds = 2.4;
+    const rate = ctx.sampleRate;
+    const impulse = ctx.createBuffer(2, Math.floor(seconds * rate), rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = impulse.getChannelData(ch);
+      for (let i = 0; i < data.length; i++) {
+        const t = i / data.length;
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 3.2);
+      }
+    }
+    const convolver = ctx.createConvolver();
+    convolver.buffer = impulse;
+    const wet = ctx.createGain();
+    wet.gain.value = 0.32;
+    voice.connect(convolver);
+    convolver.connect(wet).connect(out);
+    return voice;
   }
 
   setDrone(on: boolean): void {
@@ -81,7 +107,7 @@ export class PrismAudio {
     env.gain.setValueAtTime(0.0001, t);
     env.gain.exponentialRampToValueAtTime(gain, t + 0.01);
     env.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
-    env.connect(this.master);
+    env.connect(this.voice ?? this.master);
     for (const [mult, level] of [
       [1, 1],
       [2.01, 0.35],
@@ -119,7 +145,7 @@ export class PrismAudio {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.15, t + 0.005);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-    osc.connect(g).connect(this.master);
+    osc.connect(g).connect(this.voice ?? this.master);
     osc.start(t);
     osc.stop(t + 0.4);
   }
