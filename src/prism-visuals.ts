@@ -96,8 +96,106 @@ export function createGlowSprite(color: Color, size: number, opacity = 1) {
   return sprite;
 }
 
+let ringTexture: CanvasTexture | null = null;
+
+/** Thin glowing ring used by bursts and shockwaves. */
+function getRingTexture(): CanvasTexture {
+  if (ringTexture) return ringTexture;
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.strokeStyle = 'rgba(255,255,255,1)';
+  ctx.shadowColor = 'rgba(255,255,255,1)';
+  ctx.shadowBlur = 10;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2 - 12, 0, Math.PI * 2);
+  ctx.stroke();
+  ringTexture = new CanvasTexture(canvas);
+  ringTexture.colorSpace = SRGBColorSpace;
+  return ringTexture;
+}
+
+interface Burst {
+  ring: Sprite;
+  glow: Sprite;
+  t: number;
+  life: number;
+  size: number;
+}
+
+/**
+ * Pool of short light bursts (an expanding ring plus a flash) for crystals
+ * lighting up and levels clearing. Fixed size, so nothing is allocated while
+ * playing.
+ */
+export class BurstPool {
+  readonly group = new Group();
+  private readonly bursts: Burst[] = [];
+  private next = 0;
+
+  constructor(count = 16) {
+    this.group.name = 'Bursts';
+    for (let i = 0; i < count; i++) {
+      const ring = new Sprite(
+        new SpriteMaterial({
+          map: getRingTexture(),
+          transparent: true,
+          blending: AdditiveBlending,
+          depthWrite: false,
+        }),
+      );
+      const glow = createGlowSprite(COLORS.gold, 0.1, 1);
+      ring.visible = false;
+      glow.visible = false;
+      this.group.add(ring, glow);
+      this.bursts.push({ ring, glow, t: 1, life: 1, size: 0.1 });
+    }
+  }
+
+  spawn(x: number, y: number, z: number, color: Color, size = 0.16, life = 0.7) {
+    const b = this.bursts[this.next];
+    this.next = (this.next + 1) % this.bursts.length;
+    b.t = 0;
+    b.life = life;
+    b.size = size;
+    b.ring.position.set(x, y, z);
+    b.glow.position.set(x, y, z);
+    b.ring.material.color.copy(color);
+    b.glow.material.color.copy(color);
+    b.ring.visible = true;
+    b.glow.visible = true;
+  }
+
+  update(dt: number): void {
+    for (const b of this.bursts) {
+      if (!b.ring.visible) continue;
+      b.t += dt;
+      const k = b.t / b.life;
+      if (k >= 1) {
+        b.ring.visible = false;
+        b.glow.visible = false;
+        continue;
+      }
+      const ease = 1 - (1 - k) * (1 - k) * (1 - k);
+      b.ring.scale.setScalar(b.size * (0.15 + 0.85 * ease));
+      b.ring.material.opacity = 1 - k;
+      b.glow.scale.setScalar(b.size * 0.7 * (1 - 0.5 * k));
+      b.glow.material.opacity = (1 - k) * (1 - k);
+    }
+  }
+}
+
+export interface Board {
+  group: Group;
+  /** Rune ring material, flashed gold when a level clears. */
+  rune: MeshBasicMaterial;
+}
+
 /** Floating stone board. Its top surface is at local y = 0. */
-export function createBoard(): Group {
+export function createBoard(): Board {
   const group = new Group();
   group.name = 'PrismBoard';
 
@@ -112,10 +210,8 @@ export function createBoard(): Group {
   stone.position.y = -0.0175;
   group.add(stone);
 
-  const rune = new Mesh(
-    new TorusGeometry(0.24, 0.0035, 8, 96),
-    new MeshBasicMaterial({ color: COLORS.rune }),
-  );
+  const runeMaterial = new MeshBasicMaterial({ color: COLORS.rune.clone() });
+  const rune = new Mesh(new TorusGeometry(0.24, 0.0035, 8, 96), runeMaterial);
   rune.rotation.x = Math.PI / 2;
   rune.position.y = 0.001;
   group.add(rune);
@@ -135,7 +231,7 @@ export function createBoard(): Group {
   const underGlow = createGlowSprite(COLORS.rune, 0.9, 0.35);
   underGlow.position.y = -0.06;
   group.add(underGlow);
-  return group;
+  return { group, rune: runeMaterial };
 }
 
 /** Light source. Its lens sits at the group origin and fires along +Y. */
@@ -435,8 +531,10 @@ export function createSky(): Sky {
   // Earned stars form a ring constellation in front of the player.
   const earned: Sprite[] = [];
   const earnedRand = seeded(7);
-  for (let i = 0; i < 24; i++) {
-    const angle = -Math.PI / 2 + (i / 24) * Math.PI * 2;
+  const EARNED_MAX = 60;
+  for (let i = 0; i < EARNED_MAX; i++) {
+    // Spiral outward so early stars sit right in front of the player.
+    const angle = -Math.PI / 2 + i * 0.62;
     const radius = 14 + earnedRand() * 4;
     const sprite = createGlowSprite(
       i % 3 === 0 ? COLORS.blue : COLORS.gold,

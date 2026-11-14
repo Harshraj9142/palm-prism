@@ -5,7 +5,32 @@
 <style>
   .hud {
     flex-direction: column;
-    width: 400px;
+    width: 460px;
+  }
+
+  .chip {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    background-color: #ffc23d;
+    border-radius: 10px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .chip-icon {
+    width: 20px;
+    height: 20px;
+    color: #2a1c00;
+  }
+
+  .chip-text {
+    color: #2a1c00;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
   }
 
   .content {
@@ -82,6 +107,10 @@
         <Star id="star-3" class="star"></Star>
       </div>
     </div>
+    <div id="status-chip" class="chip" style="display: none">
+      <Sparkles class="chip-icon"></Sparkles>
+      <div id="status-text" class="chip-text">LEVEL CLEAR</div>
+    </div>
     <div id="level-title" class="title">First Light</div>
     <div id="tip-text" class="tip">Hold your palm over the light, then tilt it.</div>
     <div class="meta-row">
@@ -100,7 +129,13 @@
       <ButtonIcon>
         <LocateFixed></LocateFixed>
       </ButtonIcon>
-      <ButtonLabel>Recenter</ButtonLabel>
+      <ButtonLabel>Center</ButtonLabel>
+    </Button>
+    <Button id="daily-button">
+      <ButtonIcon>
+        <CalendarDays></CalendarDays>
+      </ButtonIcon>
+      <ButtonLabel>Daily</ButtonLabel>
     </Button>
     <Button id="next-button" style="display: none">
       <ButtonIcon>

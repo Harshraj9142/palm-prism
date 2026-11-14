@@ -24,6 +24,7 @@ import {
   MIRROR_RADIUS,
   type Vec3,
 } from '../src/levels.ts';
+import { createDailyLevel, todayKey, validates } from '../src/daily.ts';
 
 let failures = 0;
 
@@ -140,5 +141,24 @@ for (const level of LEVELS) {
   }
 }
 
-console.log(failures ? `\n${failures} level(s) failed` : '\nAll levels solvable');
+// Daily Prism: generate a year of puzzles and confirm each one validates.
+const start = new Date(2026, 10, 1);
+let dailyFailures = 0;
+const ids = new Set<string>();
+for (let d = 0; d < 365; d++) {
+  const date = new Date(start);
+  date.setDate(start.getDate() + d);
+  const key = todayKey(date);
+  const level = createDailyLevel(key);
+  if (!validates(level) || level.id !== `daily-${key}`) dailyFailures++;
+  ids.add(JSON.stringify(level.crystals.map((c) => c.pos)));
+}
+console.log(
+  dailyFailures
+    ? `FAIL daily: ${dailyFailures} of 365 days did not validate`
+    : `PASS daily: 365 days valid, ${ids.size} distinct layouts`,
+);
+failures += dailyFailures ? 1 : 0;
+
+console.log(failures ? `\n${failures} check(s) failed` : '\nAll levels solvable');
 process.exit(failures ? 1 : 0);
