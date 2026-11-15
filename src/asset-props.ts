@@ -34,6 +34,7 @@ import {
   TorusGeometry,
   Vector2,
   Vector3,
+  Box3,
   type Object3D,
   type Scene,
   type SkinnedMesh,
@@ -46,6 +47,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { CrystalKind } from './levels.js';
 import { CRYSTAL_RADIUS } from './levels.js';
 import { brassMaterial, getEnvMap, useAssetEnvironment } from './realism.js';
@@ -426,6 +428,214 @@ function installHands(world: World): void {
   );
 }
 
+// ------------------------------------------------------- Sketchfab models
+
+/**
+ * Scale an object so its height is `height` metres and wrap it so the wrapper's
+ * origin is at floor contact, centred under the object.
+ */
+function standOnFloor(object: Object3D, height: number): Group {
+  object.updateMatrixWorld(true);
+  const box = new Box3().setFromObject(object);
+  const size = box.getSize(new Vector3());
+  const scale = height / Math.max(1e-6, size.y);
+  const centre = box.getCenter(new Vector3());
+  object.position.set(-centre.x * scale, -box.min.y * scale, -centre.z * scale);
+  object.scale.setScalar(scale);
+  const wrapper = new Group();
+  wrapper.add(object);
+  return wrapper;
+}
+
+/** Point every PBR material in a model at our environment, scaled for the night room. */
+function useRoomReflections(root: Object3D, strength: number): void {
+  const env = getEnvMap();
+  root.traverse((o) => {
+    const mat = (o as Mesh).material as MeshStandardMaterial | undefined;
+    if (!mat || !(mat as MeshStandardMaterial).isMeshStandardMaterial) return;
+    mat.envMap = env;
+    mat.envMapIntensity = strength;
+    mat.needsUpdate = true;
+  });
+}
+
+/**
+ * Teal crystal from "Crystal" by Kyyy_24: eleven shards fanning from a point.
+ * Merged, centred and sized to the crystal radius; our glass material is used.
+ */
+async function loadTealCrystal(renderer: WebGLRenderer): Promise<void> {
+  const gltf = await getGLTFLoader(renderer).loadAsync(`${BASE}models/teal-crystal.glb`);
+  const parts: BufferGeometry[] = [];
+  gltf.scene.traverse((o) => {
+    if ((o as Mesh).isMesh) parts.push(bakeGeometry(o as Mesh, 1));
+  });
+  if (!parts.length) return;
+  const merged = mergeGeometries(parts.map((g) => g.toNonIndexed()), false);
+  if (!merged) return;
+  merged.computeBoundingBox();
+  const box = merged.boundingBox!;
+  const c = box.getCenter(new Vector3());
+  merged.translate(-c.x, -c.y, -c.z);
+  merged.computeBoundingSphere();
+  const r = merged.boundingSphere!.radius || 1;
+  const k = (CRYSTAL_RADIUS * 1.3) / r;
+  merged.scale(k, k, k);
+  merged.computeVertexNormals();
+  merged.computeBoundingSphere();
+  crystalGeometry.pulse = merged;
+}
+
+/** "Quartz Cluster" scan (Virginia Tech), simplified: two pieces at the room's edge. */
+const QUARTZ_SPOTS: [number, number, number, number][] = [
+  // x, z, height, yaw
+  [-2.5, -2.6, 0.32, 0.5],
+  [3.0, -2.8, 0.26, 2.3],
+];
+
+async function loadQuartz(renderer: WebGLRenderer): Promise<Group> {
+  const gltf = await getGLTFLoader(renderer).loadAsync(`${BASE}models/quartz.glb`);
+  const group = new Group();
+  group.name = 'QuartzDecor';
+  // The scan ships unlit; light it like everything else in the room.
+  gltf.scene.traverse((o) => {
+    const mesh = o as Mesh;
+    if (!mesh.isMesh) return;
+    const old = mesh.material as MeshStandardMaterial;
+    mesh.material = new MeshStandardMaterial({
+      map: old.map ?? null,
+      color: '#d9d4cc',
+      roughness: 0.55,
+      metalness: 0,
+      envMap: getEnvMap(),
+      envMapIntensity: 0.5,
+    });
+  });
+  for (const [x, z, h, yaw] of QUARTZ_SPOTS) {
+    const piece = standOnFloor(gltf.scene.clone(), h);
+    piece.position.set(x, 0, z);
+    piece.rotation.y = yaw;
+    group.add(piece);
+  }
+  return group;
+}
+
+/**
+ * "orrery" by korolevalidia: the table stays put while the arms and planets
+ * turn slowly about the centre column. Its planets are dressed with Solar
+ * System Scope maps, as spheres a hair larger than the model's own.
+ */
+// Planet centres and diameters in the model's own units (measured offline).
+const ORRERY_PLANETS: [string, number, number, number, number][] = [
+  ['jupiter', 0, 20.474, 33.256, 8.63],
+  ['earth_daymap', -27.421, 20.906, 0.028, 4.57],
+  ['mars', -26.535, 18.493, -22.211, 4.02],
+  ['saturn', 27.44, 12.73, 0, 4.93],
+  ['moon', 0, 19.198, -21.711, 2.79],
+];
+
+async function loadModelOrrery(
+  renderer: WebGLRenderer,
+  maps: Record<string, Texture>,
+): Promise<Orrery> {
+  const gltf = await getGLTFLoader(renderer).loadAsync(`${BASE}models/orrery.glb`);
+  const model = gltf.scene;
+  model.updateMatrixWorld(true);
+  // Re-parent the arms onto a pivot on the centre column (model x = z = 0).
+  const arms = new Group();
+  arms.name = 'OrreryArmsPivot';
+  const armMeshes: Object3D[] = [];
+  model.traverse((o) => {
+    if ((o as Mesh).isMesh && o.name.startsWith('OrreryArms')) armMeshes.push(o);
+  });
+  model.add(arms);
+  for (const m of armMeshes) arms.attach(m);
+  for (const [name, x, y, z, d] of ORRERY_PLANETS) {
+    const map = maps[name];
+    if (!map) continue;
+    const planet = new Mesh(
+      new SphereGeometry((d / 2) * 1.04, 32, 16),
+      new MeshStandardMaterial({ map, roughness: 0.85, metalness: 0 }),
+    );
+    planet.position.set(x, y, z);
+    planet.name = `Planet-${name}`;
+    arms.add(planet);
+    if (name === 'saturn' && maps.saturn_ring) {
+      const ring = new Mesh(
+        saturnRingGeometry(d * 0.6, d * 1.15),
+        new MeshStandardMaterial({
+          map: maps.saturn_ring,
+          color: '#e9dcc0',
+          transparent: true,
+          side: DoubleSide,
+          depthWrite: false,
+          roughness: 0.9,
+          metalness: 0,
+        }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(x, y + 0.05, z);
+      arms.add(ring);
+    }
+  }
+  useRoomReflections(model, 0.35);
+  const group = standOnFloor(model, 1.1);
+  group.name = 'Orrery';
+  return {
+    group,
+    update(dt: number) {
+      arms.rotation.y += dt * 0.05;
+    },
+  };
+}
+
+/** A ring whose u coordinate runs from the inner to the outer edge (alpha strip maps). */
+function saturnRingGeometry(inner: number, outer: number): RingGeometry {
+  const geometry = new RingGeometry(inner, outer, 64, 1);
+  const uv = geometry.getAttribute('uv');
+  const pos = geometry.getAttribute('position');
+  const v = new Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    uv.setXY(i, (v.length() - inner) / (outer - inner), 0.5);
+  }
+  return geometry;
+}
+
+/**
+ * "Planispheric astrolabe" (Virtual Museums of Małopolska, model by Stanisław
+ * Ogarek), hung by its ring from a slim brass stand: a display piece beside
+ * the board, facing the player, well outside every beam's reach.
+ */
+async function loadAstrolabe(renderer: WebGLRenderer): Promise<Group> {
+  const gltf = await getGLTFLoader(renderer).loadAsync(`${BASE}models/astrolabe.glb`);
+  useRoomReflections(gltf.scene, 0.5);
+  const DISC = 0.5;
+  const hung = standOnFloor(gltf.scene, DISC);
+  const group = new Group();
+  group.name = 'AstrolabeDisplay';
+  const HANG = 0.82; // bottom of the disc above the floor
+  hung.position.y = HANG;
+  group.add(hung);
+  // Stand beside the disc (the disc's face looks along local +x): foot,
+  // upright, and an arm the ring hangs from.
+  const brass = brassMaterial('dark');
+  const top = HANG + DISC + 0.06;
+  const upright = new Mesh(new CylinderGeometry(0.012, 0.016, top, 16, 1, true), brass);
+  upright.position.set(0, top / 2, -0.26);
+  group.add(upright);
+  const foot = new Mesh(new CylinderGeometry(0.03, 0.13, 0.03, 32), brass);
+  foot.position.set(0, 0.015, -0.26);
+  group.add(foot);
+  const arm = new Mesh(new CylinderGeometry(0.008, 0.008, 0.28, 12, 1, true), brass);
+  arm.rotation.x = Math.PI / 2;
+  arm.position.set(0, top, -0.13);
+  group.add(arm);
+  const hook = new Mesh(new CylinderGeometry(0.003, 0.003, 0.07, 8, 1, true), brass);
+  hook.position.set(0, top - 0.035, 0);
+  group.add(hook);
+  return group;
+}
+
 // -------------------------------------------------------------------- Entry
 
 export interface AssetHooks {
@@ -449,15 +659,50 @@ export function loadAssetProps(world: World, hooks: AssetHooks): void {
   const crystals = loadCrystals(renderer)
     .then(() => hooks.onCrystals())
     .catch((e) => warn('crystal meshes', e));
-  Promise.all([env, crystals]).then(() => hooks.onProp(createDecor()));
+  // The Sketchfab teal crystal replaces the CC0 cluster once it arrives.
+  Promise.all([crystals, loadTealCrystal(renderer)])
+    .then(() => hooks.onCrystals())
+    .catch((e) => warn('Sketchfab crystal', e));
+
+  // Every prop stays more than 1.7 m (beam reach) plus its own radius from the
+  // board centre. Quartz scan for decor, else the CC0 crystal clusters.
+  Promise.all([env, crystals])
+    .then(() => loadQuartz(renderer))
+    .then((quartz) => hooks.onProp(quartz))
+    .catch((e) => {
+      warn('quartz cluster', e);
+      hooks.onProp(createDecor());
+    });
+
+  // Orrery: the Sketchfab model, else the code-built one. Right of the board
+  // and well behind it, away from the HUD.
   Promise.all([env, loadPlanetMaps()])
-    .then(([, maps]) => {
-      const orrery = createOrrery(maps);
-      // Right of the board and well behind it: beyond arm's reach, away from
-      // the HUD, and more than 1.9 m from the board centre so no beam reaches it.
-      orrery.group.position.set(1.85, 0, -1.65);
-      orrery.group.scale.setScalar(1.25);
-      hooks.onProp(orrery.group, orrery.update);
+    .then(async ([, maps]) => {
+      try {
+        const orrery = await loadModelOrrery(renderer, maps);
+        orrery.group.position.set(2.1, 0, -1.6);
+        orrery.group.rotation.y = -0.6;
+        hooks.onProp(orrery.group, orrery.update);
+      } catch (e) {
+        warn('Sketchfab orrery', e);
+        const orrery = createOrrery(maps);
+        orrery.group.position.set(1.85, 0, -1.65);
+        orrery.group.scale.setScalar(1.25);
+        hooks.onProp(orrery.group, orrery.update);
+      }
     })
     .catch((e) => warn('orrery', e));
+
+  // Astrolabe: a display piece on the left, behind the HUD, facing the player.
+  env
+    .then(() => loadAstrolabe(renderer))
+    .then((astrolabe) => {
+      // Far left, clear of the HUD (about 64° off centre for the seated player)
+      // and over 1.9 m from the board centre including its stand.
+      astrolabe.position.set(-2.1, 0, -0.5);
+      // Turn the disc's face (local +x) toward the seated player at z = +0.5.
+      astrolabe.rotation.y = -Math.atan2(1.0, 2.1);
+      hooks.onProp(astrolabe);
+    })
+    .catch((e) => warn('Sketchfab astrolabe', e));
 }

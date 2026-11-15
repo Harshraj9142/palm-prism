@@ -695,8 +695,8 @@ export class PrismGameSystem extends createSystem({
           'Hold to freeze: keep a palm still for two seconds instead of pinching. ' +
           'One hand: every level gets an extra freeze. Raise or lower moves the board.',
         footnote: ASSETS_ENABLED
-          ? 'Credits: crystals by Aredon (CC0) · hands, WebXR Input Profiles (MIT) · moon_lab HDRI by ' +
-            'Greg Zaal, Poly Haven (CC0) · planet maps, Solar System Scope (CC BY 4.0). Full list: CREDITS.md'
+          ? 'Credits (CC BY 4.0): astrolabe, Virtual Museums of Małopolska · orrery, korolevalidia · ' +
+            'crystal, Kyyy_24 · quartz, Virginia Tech · planets, Solar System Scope. Also CC0/MIT; see Credits.'
           : undefined,
         stars: 0,
         freezesTotal: 0,
