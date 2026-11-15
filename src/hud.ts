@@ -1,22 +1,27 @@
 /**
- * In-headset UI for Palm Prism, drawn by hand on canvases: a paper card with
- * serif type above the board, brass-rimmed buttons, and a floating title card
- * that introduces each level.
+ * In-headset UI for Palm Prism: a holographic instrument panel of smoked
+ * glass and brass light, drawn by hand on canvases. Glowing brass linework,
+ * a slowly turning dial of light behind the panel's corner, glass buttons
+ * that fill with lamplight on hover, and a floating title that blooms in
+ * over the board when a level starts.
  *
- * Canvases are redrawn only when the shown state changes, never per frame.
- * Materials are unlit and skip tone mapping, so the paper and ink colours
- * reach the headset exactly as designed.
+ * Canvases are redrawn only when the shown state changes, never per frame;
+ * the turning dials are textured planes rotated in update(). Materials are
+ * unlit and skip tone mapping, so the colours reach the headset as designed,
+ * and every glow stays dimmer than the beam core.
  */
-import { brassMaterial } from './realism.js';
 import {
+  AdditiveBlending,
   BoxGeometry,
   CanvasTexture,
   Group,
   Mesh,
   MeshBasicMaterial,
+  MeshStandardMaterial,
   PlaneGeometry,
   SRGBColorSpace,
 } from '@iwsdk/core';
+import { brassMaterial } from './realism.js';
 
 export type HudAction =
   | 'restart'
@@ -71,13 +76,16 @@ export interface HudState {
   footnote?: string;
 }
 
-const INK = '#2a2219';
-const INK_SOFT = '#5d5243';
-const BRASS = '#a7792f';
-const BRASS_LIGHT = '#c99d4f';
-const PAPER = '#f3eadb';
-const PAPER_EDGE = '#e4d6bf';
-const OXBLOOD = '#8f3324';
+// Night observatory palette.
+const NIGHT = '#07090d';
+const SLATE = '#1b2129';
+const BRASS = '#c9a15b';
+const BRASS_LIGHT = '#f1d9a0';
+const LAMP = '#fff3d6';
+const AMBER = '#f2a93b';
+const TEAL = '#3fc7c0';
+const INK = '#efe6d4';
+const INK_SOFT = '#a99f8e';
 
 export const SERIF = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Noto Serif", serif';
 export const SANS = 'system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif';
@@ -91,6 +99,18 @@ function makeTexture(canvas: HTMLCanvasElement): CanvasTexture {
 
 function uiMaterial(map: CanvasTexture): MeshBasicMaterial {
   const material = new MeshBasicMaterial({ map, transparent: true });
+  material.toneMapped = false;
+  return material;
+}
+
+function glowMaterial(map: CanvasTexture, opacity: number): MeshBasicMaterial {
+  const material = new MeshBasicMaterial({
+    map,
+    transparent: true,
+    opacity,
+    blending: AdditiveBlending,
+    depthWrite: false,
+  });
   material.toneMapped = false;
   return material;
 }
@@ -109,6 +129,27 @@ function roundRect(
   ctx.arcTo(x + w, y + h, x, y + h, r);
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/** A panel outline with clipped (chamfered) corners, like cut glass. */
+function chamferPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  c: number,
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + c, y);
+  ctx.lineTo(x + w - c, y);
+  ctx.lineTo(x + w, y + c);
+  ctx.lineTo(x + w, y + h - c);
+  ctx.lineTo(x + w - c, y + h);
+  ctx.lineTo(x + c, y + h);
+  ctx.lineTo(x, y + h - c);
+  ctx.lineTo(x, y + c);
   ctx.closePath();
 }
 
@@ -159,45 +200,177 @@ function spaced(ctx: CanvasRenderingContext2D, px: number) {
   (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${px}px`;
 }
 
-let paperCache: HTMLCanvasElement | null = null;
+function glow(ctx: CanvasRenderingContext2D, color: string, blur: number) {
+  ctx.shadowColor = color;
+  ctx.shadowBlur = blur;
+}
 
-/** Cream paper with a faint grain and a deckled shadow edge. */
-function paper(w: number, h: number): HTMLCanvasElement {
-  if (paperCache && paperCache.width === w && paperCache.height === h) return paperCache;
+function noGlow(ctx: CanvasRenderingContext2D) {
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = 'transparent';
+}
+
+let panelCache: HTMLCanvasElement | null = null;
+
+/**
+ * Smoked glass with a fine engraved grid, a brass-light border with brighter
+ * corner brackets, and a scale of ticks along the top edge.
+ */
+function glassPanel(w: number, h: number): HTMLCanvasElement {
+  if (panelCache && panelCache.width === w && panelCache.height === h) return panelCache;
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d')!;
-  roundRect(ctx, 0, 0, w, h, 18);
+  const c = 26;
+
+  chamferPath(ctx, 6, 6, w - 12, h - 12, c);
   ctx.save();
   ctx.clip();
-  const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, PAPER);
-  g.addColorStop(1, PAPER_EDGE);
+  const g = ctx.createLinearGradient(0, 0, w, h);
+  g.addColorStop(0, 'rgba(27,33,41,0.94)');
+  g.addColorStop(0.55, 'rgba(12,15,20,0.94)');
+  g.addColorStop(1, 'rgba(7,9,13,0.96)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
-  let s = 99;
-  const rand = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
-  for (let i = 0; i < 7000; i++) {
-    ctx.fillStyle = `rgba(90,70,40,${rand() * 0.05})`;
-    ctx.fillRect(rand() * w, rand() * h, 1.6, 1.6);
+  // Warm light falling across the glass from the top left.
+  const sheen = ctx.createRadialGradient(w * 0.2, -h * 0.2, 0, w * 0.2, -h * 0.2, w * 0.8);
+  sheen.addColorStop(0, 'rgba(241,217,160,0.10)');
+  sheen.addColorStop(1, 'rgba(241,217,160,0)');
+  ctx.fillStyle = sheen;
+  ctx.fillRect(0, 0, w, h);
+  // Engraved hex grid, very faint.
+  ctx.strokeStyle = 'rgba(201,161,91,0.05)';
+  ctx.lineWidth = 1;
+  const r = 22;
+  for (let row = 0; row * r * 1.5 < h + r; row++) {
+    for (let col = 0; col * r * 1.732 < w + r; col++) {
+      hexPath(ctx, col * r * 1.732 + (row % 2) * r * 0.866, row * r * 1.5, r);
+      ctx.stroke();
+    }
   }
+  // Fine horizontal scan lines.
+  ctx.fillStyle = 'rgba(255,243,214,0.018)';
+  for (let y = 0; y < h; y += 4) ctx.fillRect(0, y, w, 1);
   ctx.restore();
+
+  // Border: thin brass light with a soft glow.
+  glow(ctx, 'rgba(242,169,59,0.65)', 14);
+  ctx.strokeStyle = 'rgba(201,161,91,0.75)';
+  ctx.lineWidth = 2;
+  chamferPath(ctx, 6, 6, w - 12, h - 12, c);
+  ctx.stroke();
+  // Brighter corner brackets.
   ctx.strokeStyle = BRASS_LIGHT;
-  ctx.lineWidth = 3;
-  roundRect(ctx, 1.5, 1.5, w - 3, h - 3, 17);
-  ctx.stroke();
-  ctx.strokeStyle = 'rgba(167,121,47,0.35)';
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, 12, 12, w - 24, h - 24, 10);
-  ctx.stroke();
-  paperCache = canvas;
+  ctx.lineWidth = 3.5;
+  const L = 64;
+  const corners: [number, number, number, number][] = [
+    [6, 6, 1, 1],
+    [w - 6, 6, -1, 1],
+    [6, h - 6, 1, -1],
+    [w - 6, h - 6, -1, -1],
+  ];
+  for (const [x, y, sx, sy] of corners) {
+    ctx.beginPath();
+    ctx.moveTo(x + sx * (c + L), y);
+    ctx.lineTo(x + sx * c, y);
+    ctx.lineTo(x, y + sy * c);
+    ctx.lineTo(x, y + sy * (c + L * 0.6));
+    ctx.stroke();
+  }
+  noGlow(ctx);
+  // A measuring scale along the top edge.
+  ctx.strokeStyle = 'rgba(241,217,160,0.35)';
+  ctx.lineWidth = 1.2;
+  for (let x = 140; x < w - 140; x += 12) {
+    const long = (x - 140) % 96 === 0;
+    ctx.beginPath();
+    ctx.moveTo(x, 18);
+    ctx.lineTo(x, long ? 30 : 24);
+    ctx.stroke();
+  }
+  panelCache = canvas;
   return canvas;
+}
+
+/**
+ * A dial of light: concentric rings, degree ticks and broken arcs. Drawn once
+ * and turned slowly behind the panel's corner and the title card.
+ */
+function drawDial(size: number, seed: number): CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const c = size / 2;
+  let s = seed;
+  const rand = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+  glow(ctx, 'rgba(242,169,59,0.9)', size * 0.012);
+  const ring = (r: number, width: number, alpha: number) => {
+    ctx.strokeStyle = `rgba(241,217,160,${alpha})`;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.arc(c, c, r, 0, Math.PI * 2);
+    ctx.stroke();
+  };
+  ring(c * 0.94, size * 0.004, 0.8);
+  ring(c * 0.9, size * 0.002, 0.45);
+  ring(c * 0.62, size * 0.002, 0.4);
+  // Degree ticks.
+  for (let i = 0; i < 120; i++) {
+    const a = (i / 120) * Math.PI * 2;
+    const long = i % 10 === 0;
+    const r1 = c * 0.9;
+    const r0 = r1 - (long ? c * 0.08 : c * 0.035);
+    ctx.strokeStyle = `rgba(241,217,160,${long ? 0.8 : 0.4})`;
+    ctx.lineWidth = long ? size * 0.004 : size * 0.002;
+    ctx.beginPath();
+    ctx.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0);
+    ctx.lineTo(c + Math.cos(a) * r1, c + Math.sin(a) * r1);
+    ctx.stroke();
+  }
+  // Broken arcs between the rings.
+  for (let k = 0; k < 3; k++) {
+    const r = c * (0.7 + k * 0.06);
+    let a = rand() * Math.PI * 2;
+    for (let n = 0; n < 4; n++) {
+      const len = 0.3 + rand() * 0.8;
+      ctx.strokeStyle = k === 1 ? 'rgba(63,199,192,0.55)' : 'rgba(242,169,59,0.6)';
+      ctx.lineWidth = size * (k === 1 ? 0.006 : 0.003);
+      ctx.beginPath();
+      ctx.arc(c, c, r, a, a + len);
+      ctx.stroke();
+      a += len + 0.2 + rand() * 0.6;
+    }
+  }
+  // Small hexes around the inner ring, like settings on an instrument.
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + 0.26;
+    hexPath(ctx, c + Math.cos(a) * c * 0.5, c + Math.sin(a) * c * 0.5, c * 0.035);
+    ctx.strokeStyle = 'rgba(241,217,160,0.6)';
+    ctx.lineWidth = size * 0.003;
+    ctx.stroke();
+  }
+  const texture = makeTexture(canvas);
+  texture.anisotropy = 4;
+  return texture;
+}
+
+/**
+ * A flat dial of light lying around the board's rim, turned by the caller.
+ * Additive and dim, so the beam stays the brightest thing in view.
+ */
+export function createBoardDial(diameter: number): Mesh {
+  const mesh = new Mesh(new PlaneGeometry(diameter, diameter), glowMaterial(drawDial(1024, 47), 0.2));
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.name = 'BoardDial';
+  mesh.renderOrder = 1;
+  return mesh;
 }
 
 const CARD_W = 1024;
 const CARD_H = 560;
-const CARD_METERS_W = 0.52;
+const CARD_METERS_W = 0.48;
 const CARD_METERS_H = (CARD_METERS_W * CARD_H) / CARD_W;
 const PX = CARD_METERS_W / CARD_W;
 
@@ -246,14 +419,22 @@ const BUTTON_LAYOUT: Record<
 const BUTTON_Y = 474;
 const BUTTON_Z = 0.004;
 const BUTTON_H = 78;
+/**
+ * Margin around each button canvas for its glow. Zero keeps every button's
+ * ray target exactly its old size, so neighbouring buttons never overlap.
+ */
+const BUTTON_PAD = 0;
 
-/** The paper HUD card plus its main and options button rows. */
+/** The glass HUD panel plus its main, options and level-picker button rows. */
 export class Hud {
   readonly root = new Group();
   readonly buttons = {} as Record<HudAction, ButtonVisual>;
   private readonly canvas = document.createElement('canvas');
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: CanvasTexture;
+  private readonly dialOuter: Mesh;
+  private readonly dialInner: Mesh;
+  private pulse = 0;
 
   constructor() {
     this.root.name = 'Hud';
@@ -266,24 +447,48 @@ export class Hud {
       uiMaterial(this.texture),
     );
     card.name = 'HudCard';
+    card.renderOrder = 1;
     this.root.add(card);
-    // A brass backing plate gives the card real thickness and an edge that
-    // catches the light.
+    // A slim slate back plate with a brass edge gives the glass real
+    // thickness and catches the room's light.
+    const edge = brassMaterial('dark');
     const plate = new Mesh(
-      new BoxGeometry(CARD_METERS_W + 0.016, CARD_METERS_H + 0.016, 0.006),
-      brassMaterial('bright'),
+      new BoxGeometry(CARD_METERS_W + 0.006, CARD_METERS_H + 0.006, 0.005),
+      [
+        edge,
+        edge,
+        edge,
+        edge,
+        new MeshStandardMaterial({ color: SLATE, roughness: 0.8, metalness: 0 }),
+        new MeshStandardMaterial({ color: NIGHT, roughness: 0.8, metalness: 0 }),
+      ],
     );
     plate.position.z = -0.0035;
     plate.name = 'HudPlate';
     this.root.add(plate);
+
+    // Two dials of light turning in opposite directions behind the top-right
+    // corner, half hidden by the panel.
+    this.dialOuter = new Mesh(new PlaneGeometry(0.3, 0.3), glowMaterial(drawDial(512, 3), 0.55));
+    this.dialOuter.position.set(CARD_METERS_W / 2 - 0.02, CARD_METERS_H / 2 - 0.01, -0.008);
+    this.dialOuter.name = 'HudDial';
+    this.root.add(this.dialOuter);
+    this.dialInner = new Mesh(new PlaneGeometry(0.17, 0.17), glowMaterial(drawDial(256, 11), 0.5));
+    this.dialInner.position.copy(this.dialOuter.position);
+    this.dialInner.position.z -= 0.001;
+    this.root.add(this.dialInner);
 
     for (const action of Object.keys(BUTTON_LAYOUT) as HudAction[]) {
       const spec = BUTTON_LAYOUT[action];
       const normal = this.drawButton(spec.w, spec.label, spec.icon, false);
       const hover = this.drawButton(spec.w, spec.label, spec.icon, true);
       const material = uiMaterial(normal);
-      const mesh = new Mesh(new PlaneGeometry(spec.w * PX, BUTTON_H * PX), material);
+      const mesh = new Mesh(
+        new PlaneGeometry((spec.w + BUTTON_PAD * 2) * PX, (BUTTON_H + BUTTON_PAD * 2) * PX),
+        material,
+      );
       mesh.name = `HudButton-${action}`;
+      mesh.renderOrder = 2;
       mesh.position.set(
         (spec.x - CARD_W / 2) * PX,
         (CARD_H / 2 - BUTTON_Y) * PX,
@@ -304,6 +509,15 @@ export class Hud {
     }
   }
 
+  /** Turn the dials. Cheap: two rotations and one opacity per frame. */
+  update(dt: number): void {
+    this.dialOuter.rotation.z += dt * 0.09;
+    this.dialInner.rotation.z -= dt * 0.21;
+    this.pulse += dt;
+    (this.dialOuter.material as MeshBasicMaterial).opacity =
+      0.48 + Math.sin(this.pulse * 1.3) * 0.07;
+  }
+
   private drawButton(
     w: number,
     label: string,
@@ -312,71 +526,80 @@ export class Hud {
   ): CanvasTexture {
     const scale = 2;
     const canvas = document.createElement('canvas');
-    canvas.width = w * scale;
-    canvas.height = BUTTON_H * scale;
+    canvas.width = (w + BUTTON_PAD * 2) * scale;
+    canvas.height = (BUTTON_H + BUTTON_PAD * 2) * scale;
     const ctx = canvas.getContext('2d')!;
     ctx.scale(scale, scale);
-    roundRect(ctx, 3, 3, w - 6, BUTTON_H - 6, (BUTTON_H - 6) / 2);
-    ctx.fillStyle = hovered ? BRASS_LIGHT : '#efe4d1';
+    ctx.translate(BUTTON_PAD, BUTTON_PAD);
+    // Glass pill; on hover it fills with lamplight.
+    roundRect(ctx, 4, 6, w - 8, BUTTON_H - 12, (BUTTON_H - 12) / 2);
+    if (hovered) {
+      const g = ctx.createLinearGradient(0, 0, 0, BUTTON_H);
+      g.addColorStop(0, BRASS_LIGHT);
+      g.addColorStop(1, AMBER);
+      ctx.fillStyle = g;
+      glow(ctx, 'rgba(242,169,59,0.9)', 16);
+    } else {
+      ctx.fillStyle = 'rgba(20,25,32,0.92)';
+    }
     ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = hovered ? '#7a5620' : BRASS;
+    noGlow(ctx);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = hovered ? LAMP : 'rgba(201,161,91,0.85)';
+    if (!hovered) glow(ctx, 'rgba(242,169,59,0.6)', 8);
     ctx.stroke();
-    ctx.fillStyle = INK;
-    ctx.strokeStyle = INK;
-    if (icon === 'target') {
-      const cx = w / 2;
-      const cy = BUTTON_H / 2;
-      ctx.lineWidth = 3;
+    noGlow(ctx);
+    // Inner highlight line on the glass.
+    if (!hovered) {
+      ctx.strokeStyle = 'rgba(241,217,160,0.12)';
+      ctx.lineWidth = 1;
+      roundRect(ctx, 9, 10, w - 18, BUTTON_H - 20, (BUTTON_H - 20) / 2);
+      ctx.stroke();
+    }
+    const ink = hovered ? NIGHT : BRASS_LIGHT;
+    ctx.fillStyle = ink;
+    ctx.strokeStyle = ink;
+    if (!hovered) glow(ctx, 'rgba(242,169,59,0.55)', 6);
+    const cx = w / 2;
+    const cy = BUTTON_H / 2;
+    if (icon === 'gear') {
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * 12, cy + Math.sin(a) * 12);
+        ctx.lineTo(cx + Math.cos(a) * 19, cy + Math.sin(a) * 19);
+        ctx.lineWidth = 5;
+        ctx.stroke();
+      }
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.arc(cx, cy, 15, 0, Math.PI * 2);
+      ctx.arc(cx, cy, 13, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (icon === 'target') {
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
       ctx.stroke();
       ctx.beginPath();
       ctx.arc(cx, cy, 4, 0, Math.PI * 2);
       ctx.fill();
-      for (const [dx, dy] of [
-        [0, -1],
-        [0, 1],
-        [-1, 0],
-        [1, 0],
-      ]) {
-        ctx.beginPath();
-        ctx.moveTo(cx + dx * 19, cy + dy * 19);
-        ctx.lineTo(cx + dx * 26, cy + dy * 26);
-        ctx.stroke();
-      }
-    } else if (icon === 'gear') {
-      const cx = w / 2;
-      const cy = BUTTON_H / 2;
-      ctx.lineWidth = 3;
-      for (let i = 0; i < 8; i++) {
-        const a = (i / 8) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(a) * 13, cy + Math.sin(a) * 13);
-        ctx.lineTo(cx + Math.cos(a) * 21, cy + Math.sin(a) * 21);
-        ctx.lineWidth = 6;
-        ctx.stroke();
-      }
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
-      ctx.fillStyle = hovered ? BRASS_LIGHT : '#efe4d1';
-      ctx.fill();
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-      ctx.stroke();
     } else {
-      let size = 32;
+      let size = 28;
       ctx.font = `600 ${size}px ${SANS}`;
-      while (size > 20 && ctx.measureText(label).width > w - 34) {
+      spaced(ctx, 1.5);
+      while (size > 18 && ctx.measureText(label).width > w - 34) {
         size -= 1;
         ctx.font = `600 ${size}px ${SANS}`;
       }
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(label, w / 2, BUTTON_H / 2 + 2);
+      ctx.fillText(label, cx, cy + 1);
+      spaced(ctx, 0);
     }
+    noGlow(ctx);
     return makeTexture(canvas);
   }
 
@@ -419,33 +642,47 @@ export class Hud {
   draw(state: HudState): void {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, CARD_W, CARD_H);
-    ctx.drawImage(paper(CARD_W, CARD_H), 0, 0);
-    const left = 56;
-    const right = CARD_W - 56;
+    ctx.drawImage(glassPanel(CARD_W, CARD_H), 0, 0);
+    const left = 60;
+    const right = CARD_W - 60;
 
-    // Label in letter-spaced small caps, stars on the right.
-    ctx.fillStyle = BRASS;
-    ctx.font = `700 24px ${SANS}`;
+    // Label: letter-spaced caps in amber light, with a small lamp mark.
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    spaced(ctx, 4);
-    ctx.fillText(state.label.toUpperCase(), left, 78);
+    glow(ctx, 'rgba(242,169,59,0.8)', 10);
+    ctx.fillStyle = AMBER;
+    ctx.beginPath();
+    ctx.arc(left + 6, 70, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = `700 22px ${SANS}`;
+    spaced(ctx, 5);
+    ctx.fillText(state.label.toUpperCase(), left + 22, 78);
     spaced(ctx, 0);
     for (let i = 0; i < (state.hideStars ? 0 : 3); i++) {
-      starPath(ctx, right - 18 - (2 - i) * 46, 68, 18);
+      starPath(ctx, right - 18 - (2 - i) * 46, 68, 17);
       if (i < state.stars) {
         ctx.fillStyle = BRASS_LIGHT;
         ctx.fill();
       }
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2;
       ctx.strokeStyle = BRASS;
       ctx.stroke();
     }
+    noGlow(ctx);
 
-    // Title.
+    // Title in warm lamplight.
+    glow(ctx, 'rgba(242,169,59,0.55)', 18);
     ctx.fillStyle = INK;
-    ctx.font = `600 70px ${SERIF}`;
-    ctx.fillText(state.title, left, 160);
+    ctx.font = `600 66px ${SERIF}`;
+    ctx.fillText(state.title, left, 156);
+    noGlow(ctx);
+    // A glowing underline that fades to the right.
+    const line = ctx.createLinearGradient(left, 0, right, 0);
+    line.addColorStop(0, 'rgba(242,169,59,0.9)');
+    line.addColorStop(0.5, 'rgba(242,169,59,0.25)');
+    line.addColorStop(1, 'rgba(242,169,59,0)');
+    ctx.fillStyle = line;
+    ctx.fillRect(left, 176, right - left, 2);
 
     if (state.levelList) {
       this.drawLevelList(ctx, state.levelList, left, right);
@@ -453,28 +690,19 @@ export class Hud {
       return;
     }
 
-    // Tip, up to two lines.
+    // Tip.
     ctx.fillStyle = INK_SOFT;
-    ctx.font = `italic 31px ${SERIF}`;
-    wrap(ctx, state.tip, right - left - (state.solved ? 170 : 0))
+    ctx.font = `italic 30px ${SERIF}`;
+    wrap(ctx, state.tip, right - left - (state.solved ? 180 : 0))
       .slice(0, state.hideMeta ? (state.footnote ? 3 : 4) : 2)
-      .forEach((line, i) => ctx.fillText(line, left, 218 + i * 40));
+      .forEach((text, i) => ctx.fillText(text, left, 226 + i * 40));
 
     if (state.footnote) {
-      ctx.fillStyle = INK_SOFT;
-      ctx.font = `20px ${SANS}`;
+      ctx.fillStyle = 'rgba(169,159,142,0.85)';
+      ctx.font = `19px ${SANS}`;
       wrap(ctx, state.footnote, right - left)
         .slice(0, 2)
-        .forEach((line, i) => ctx.fillText(line, left, 356 + i * 26));
-    }
-
-    if (!state.hideMeta) {
-      ctx.strokeStyle = 'rgba(167,121,47,0.45)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(left, 312);
-      ctx.lineTo(right, 312);
-      ctx.stroke();
+        .forEach((text, i) => ctx.fillText(text, left, 362 + i * 25));
     }
 
     if (state.hideMeta) {
@@ -482,20 +710,22 @@ export class Hud {
       return;
     }
 
-    // Freezes as hexagon tokens.
-    ctx.font = `700 22px ${SANS}`;
-    spaced(ctx, 3);
+    // Freezes as glowing hex cells.
+    ctx.font = `700 20px ${SANS}`;
+    spaced(ctx, 4);
     ctx.fillStyle = BRASS;
-    ctx.fillText(state.freezesTotal > 0 ? 'FREEZES' : 'PALMS ONLY', left, 366);
+    ctx.fillText(state.freezesTotal > 0 ? 'FREEZES' : 'PALMS ONLY', left, 372);
     spaced(ctx, 0);
     for (let i = 0; i < state.freezesTotal; i++) {
-      hexPath(ctx, left + 160 + i * 40, 358, 14);
+      hexPath(ctx, left + 168 + i * 40, 364, 14);
       if (i < state.freezesLeft) {
-        ctx.fillStyle = BRASS_LIGHT;
+        glow(ctx, 'rgba(63,199,192,0.9)', 12);
+        ctx.fillStyle = TEAL;
         ctx.fill();
+        noGlow(ctx);
       }
-      ctx.lineWidth = 2.5;
-      ctx.strokeStyle = BRASS;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(63,199,192,0.8)';
       ctx.stroke();
     }
 
@@ -503,20 +733,16 @@ export class Hud {
     if (state.streak > 0) {
       ctx.textAlign = 'right';
       ctx.fillStyle = INK_SOFT;
-      ctx.font = `italic 28px ${SERIF}`;
-      ctx.fillText(
-        `${state.streak}-day streak`,
-        right,
-        366,
-      );
+      ctx.font = `italic 26px ${SERIF}`;
+      ctx.fillText(`${state.streak}-day streak`, right, 372);
       ctx.textAlign = 'left';
     }
 
-    if (state.solved) this.stamp(ctx, right - 76, 228);
+    if (state.solved) this.seal(ctx, right - 80, 250);
     this.texture.needsUpdate = true;
   }
 
-  /** Two columns of levels: numeral, title and best stars; current one marked. */
+  /** Two columns of levels: numeral, title and best stars; current one lit. */
   private drawLevelList(
     ctx: CanvasRenderingContext2D,
     list: LevelEntry[],
@@ -528,67 +754,81 @@ export class Hud {
       const col = Math.floor(i / 4);
       const row = i % 4;
       const x = left + col * colW;
-      const y = 214 + row * 52;
+      const y = 226 + row * 52;
       if (entry.current) {
-        ctx.fillStyle = 'rgba(201,157,79,0.22)';
-        roundRect(ctx, x - 12, y - 34, colW - 16, 46, 8);
+        const g = ctx.createLinearGradient(x - 12, 0, x + colW - 28, 0);
+        g.addColorStop(0, 'rgba(242,169,59,0.28)');
+        g.addColorStop(1, 'rgba(242,169,59,0)');
+        ctx.fillStyle = g;
+        chamferPath(ctx, x - 12, y - 34, colW - 16, 46, 8);
         ctx.fill();
+        ctx.fillStyle = AMBER;
+        ctx.fillRect(x - 12, y - 34, 3, 46);
       }
       ctx.textAlign = 'left';
-      ctx.fillStyle = BRASS;
-      ctx.font = `700 22px ${SANS}`;
+      glow(ctx, 'rgba(242,169,59,0.6)', 6);
+      ctx.fillStyle = AMBER;
+      ctx.font = `700 21px ${SANS}`;
       spaced(ctx, 2);
       ctx.fillText(entry.numeral, x, y);
       spaced(ctx, 0);
+      noGlow(ctx);
       ctx.fillStyle = INK;
-      ctx.font = `600 30px ${SERIF}`;
-      ctx.fillText(entry.title, x + 62, y);
+      ctx.font = `600 28px ${SERIF}`;
+      ctx.fillText(entry.title, x + 56, y);
       for (let s = 0; s < 3; s++) {
         starPath(ctx, x + colW - 96 + s * 26, y - 10, 10);
         if (s < entry.stars) {
           ctx.fillStyle = BRASS_LIGHT;
           ctx.fill();
         }
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.8;
         ctx.strokeStyle = BRASS;
         ctx.stroke();
       }
     });
   }
 
-  /** A slightly crooked ink stamp, like a seal on a solved page. */
-  private stamp(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
+  /** A glowing teal seal of light on a solved level. */
+  private seal(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(-0.16);
-    ctx.globalAlpha = 0.85;
-    ctx.strokeStyle = OXBLOOD;
-    ctx.fillStyle = OXBLOOD;
-    ctx.lineWidth = 4;
+    glow(ctx, 'rgba(63,199,192,0.9)', 16);
+    ctx.strokeStyle = TEAL;
+    ctx.fillStyle = TEAL;
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(0, 0, 70, 0, Math.PI * 2);
+    ctx.arc(0, 0, 66, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, 61, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.font = `700 26px ${SANS}`;
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 36; i++) {
+      const a = (i / 36) * Math.PI * 2;
+      const inner = i % 3 === 0 ? 48 : 52;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 56, Math.sin(a) * 56);
+      ctx.lineTo(Math.cos(a) * inner, Math.sin(a) * inner);
+      ctx.stroke();
+    }
+    ctx.font = `700 22px ${SANS}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    spaced(ctx, 3);
-    ctx.fillText('SOLVED', 3, 0);
+    spaced(ctx, 4);
+    ctx.fillText('SOLVED', 3, -2);
     spaced(ctx, 0);
+    ctx.fillStyle = BRASS_LIGHT;
     for (let i = 0; i < 3; i++) {
-      starPath(ctx, -22 + i * 22, 32, 7);
+      starPath(ctx, -20 + i * 20, 24, 6.5);
       ctx.fill();
     }
     ctx.restore();
+    noGlow(ctx);
   }
 }
 
 /**
- * Floating title that fades in above the board when a level starts or is
- * solved: a small kicker line and a large serif title in warm light.
+ * Floating title that blooms in above the board when a level starts or is
+ * solved: a glowing kicker, a large serif title in lamplight, and a dial of
+ * light turning behind it.
  */
 export class TitleCard {
   readonly mesh: Mesh;
@@ -596,6 +836,8 @@ export class TitleCard {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: CanvasTexture;
   private readonly material: MeshBasicMaterial;
+  private readonly dial: Mesh;
+  private readonly dialMaterial: MeshBasicMaterial;
   private t = 0;
   private duration = 0;
 
@@ -613,6 +855,12 @@ export class TitleCard {
     this.mesh.name = 'TitleCard';
     this.mesh.visible = false;
     this.mesh.renderOrder = 10;
+    this.dialMaterial = glowMaterial(drawDial(512, 29), 0);
+    this.dialMaterial.depthTest = false;
+    this.dial = new Mesh(new PlaneGeometry(0.3, 0.3), this.dialMaterial);
+    this.dial.position.z = -0.002;
+    this.dial.renderOrder = 9;
+    this.mesh.add(this.dial);
   }
 
   show(kicker: string, title: string, duration = 2.6): void {
@@ -621,23 +869,32 @@ export class TitleCard {
     ctx.clearRect(0, 0, w, this.canvas.height);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    ctx.shadowColor = 'rgba(0,0,0,0.85)';
-    ctx.shadowBlur = 18;
-    ctx.fillStyle = '#e7c27a';
-    ctx.font = `700 34px ${SANS}`;
-    spaced(ctx, 8);
+    glow(ctx, 'rgba(242,169,59,0.9)', 16);
+    ctx.fillStyle = AMBER;
+    ctx.font = `700 32px ${SANS}`;
+    spaced(ctx, 10);
     ctx.fillText(kicker.toUpperCase(), w / 2, 92);
     spaced(ctx, 0);
-    ctx.fillStyle = '#fbf3e3';
-    ctx.font = `600 104px ${SERIF}`;
-    ctx.fillText(title, w / 2, 208);
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(231,194,122,0.7)';
-    ctx.lineWidth = 2;
+    glow(ctx, 'rgba(242,169,59,0.75)', 24);
+    ctx.fillStyle = LAMP;
+    ctx.font = `600 100px ${SERIF}`;
+    ctx.fillText(title, w / 2, 206);
+    // Light rule with a diamond at its centre.
+    const g = ctx.createLinearGradient(w / 2 - 200, 0, w / 2 + 200, 0);
+    g.addColorStop(0, 'rgba(242,169,59,0)');
+    g.addColorStop(0.5, 'rgba(241,217,160,0.95)');
+    g.addColorStop(1, 'rgba(242,169,59,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(w / 2 - 200, 244, 400, 2);
+    ctx.fillStyle = BRASS_LIGHT;
     ctx.beginPath();
-    ctx.moveTo(w / 2 - 90, 246);
-    ctx.lineTo(w / 2 + 90, 246);
-    ctx.stroke();
+    ctx.moveTo(w / 2, 237);
+    ctx.lineTo(w / 2 + 8, 245);
+    ctx.lineTo(w / 2, 253);
+    ctx.lineTo(w / 2 - 8, 245);
+    ctx.closePath();
+    ctx.fill();
+    noGlow(ctx);
     this.texture.needsUpdate = true;
     this.t = 0;
     this.duration = duration;
@@ -649,7 +906,11 @@ export class TitleCard {
     this.t += dt;
     const fadeIn = Math.min(1, this.t / 0.35);
     const fadeOut = Math.min(1, Math.max(0, (this.duration - this.t) / 0.6));
-    this.material.opacity = Math.min(fadeIn, fadeOut);
+    const k = Math.min(fadeIn, fadeOut);
+    this.material.opacity = k;
+    this.dialMaterial.opacity = k * 0.4;
+    this.dial.rotation.z += dt * 0.5;
+    this.dial.scale.setScalar(0.85 + fadeIn * 0.15);
     this.mesh.position.y = this.baseY + (1 - fadeIn) * -0.02;
     if (this.t >= this.duration) this.mesh.visible = false;
   }

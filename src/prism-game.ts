@@ -38,7 +38,7 @@ import {
   type SphereTarget,
 } from './beam.js';
 import { createDailyLevel, todayKey } from './daily.js';
-import { Hud, TitleCard, type HudAction, type HudGroup, type HudState } from './hud.js';
+import { createBoardDial, Hud, TitleCard, type HudAction, type HudGroup, type HudState } from './hud.js';
 import {
   CHARGE_SECONDS,
   CRYSTAL_AIM_ASSIST,
@@ -127,11 +127,14 @@ const BOARD_DROP = 0.42;
 const DESKTOP_BOARD_POSITION = new Vector3(0.12, 1.0, -0.5);
 // Off to the left and turned toward the player: beams that rise from the
 // lamp never cross it, and hand rays over the board point past it, so
-// pinches there freeze mirrors instead of pressing buttons.
-const HUD_LOCAL = new Vector3(-0.42, 0.56, -0.12);
-const HUD_YAW = 0.5;
-const HUD_TILT = -0.12;
-const TITLE_LOCAL_Y = 0.34;
+// pinches there freeze mirrors instead of pressing buttons. Set back and at
+// eye level so the whole panel sits inside a Quest's view while playing.
+const HUD_LOCAL = new Vector3(-0.47, 0.44, -0.22);
+const HUD_YAW = 0.6;
+const HUD_TILT = -0.06;
+// Titles float above and behind the play volume (crystals reach y = 0.4).
+const TITLE_LOCAL_Y = 0.52;
+const TITLE_LOCAL_Z = -0.22;
 const HIDDEN_Y = -100;
 const INTRO_SECONDS = 0.6;
 const AUTO_ADVANCE_SECONDS = 3.5;
@@ -211,6 +214,7 @@ export class PrismGameSystem extends createSystem({
   /** Downloaded props, board-relative, standing on the floor (see asset-props.ts). */
   private props!: Group;
   private propUpdates: ((dt: number) => void)[] = [];
+  private boardDial!: Object3D;
   private rune!: MeshBasicMaterial;
   private levelGroup!: Group;
   private emitter!: Group;
@@ -369,9 +373,14 @@ export class PrismGameSystem extends createSystem({
     this.board.add(this.ghostLine);
 
     this.titleCard = new TitleCard();
-    this.titleCard.mesh.position.set(0, TITLE_LOCAL_Y, -0.04);
+    this.titleCard.mesh.position.set(0, TITLE_LOCAL_Y, TITLE_LOCAL_Z);
     this.titleCard.baseY = TITLE_LOCAL_Y;
     this.board.add(this.titleCard.mesh);
+
+    // A dial of light turning slowly around the board's brass rim.
+    this.boardDial = createBoardDial(0.64);
+    this.boardDial.position.y = 0.0012;
+    this.board.add(this.boardDial);
 
     this.setupHud();
     this.loadLevel(Math.min(this.progress.unlocked, LEVELS.length - 1));
@@ -1231,6 +1240,8 @@ export class PrismGameSystem extends createSystem({
     this.updateHint(time);
     this.bursts.update(dt);
     this.titleCard.update(dt);
+    this.hud.update(dt);
+    this.boardDial.rotation.z += dt * 0.04;
     if (this.clearFlash > 0) {
       this.clearFlash = Math.max(0, this.clearFlash - dt * 0.6);
       this.rune.color.copy(COLORS.rune).lerp(COLORS.beamGlow, this.clearFlash);

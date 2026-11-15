@@ -2,10 +2,15 @@
 
 :root {
   --ink: #f6eedf;
-  --ink-soft: #c9bda8;
-  --brass: #d8a74e;
+  --ink-soft: #b9ae9b;
+  --brass: #c9a15b;
+  --brass-light: #f1d9a0;
   --brass-deep: #a7792f;
-  --night: #070a14;
+  --amber: #f2a93b;
+  --teal: #3fc7c0;
+  --lamp: #fff3d6;
+  --night: #07090d;
+  --slate: #1b2129;
   --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Noto Serif', serif;
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
 }
@@ -37,12 +42,72 @@ body {
 }
 
 .pp-card {
+  position: relative;
   pointer-events: auto;
   box-sizing: border-box;
-  width: min(560px, 100%);
-  padding: 0 clamp(20px, 6vw, 72px) clamp(28px, 8vh, 80px);
+  width: min(580px, calc(100% - 32px));
+  margin: 0 0 clamp(16px, 6vh, 64px) clamp(16px, 5vw, 64px);
+  padding: clamp(24px, 4vw, 40px) clamp(22px, 4vw, 44px);
   color: var(--ink);
   font-family: var(--sans);
+  /* Smoked glass with clipped corners and a brass-light edge. */
+  background:
+    radial-gradient(120% 80% at 10% -10%, rgba(241, 217, 160, 0.1), transparent 60%),
+    linear-gradient(160deg, rgba(27, 33, 41, 0.9), rgba(7, 9, 13, 0.92));
+  clip-path: polygon(22px 0, calc(100% - 22px) 0, 100% 22px, 100% calc(100% - 22px), calc(100% - 22px) 100%, 22px 100%, 0 calc(100% - 22px), 0 22px);
+  box-shadow: inset 0 0 0 1px rgba(201, 161, 91, 0.55);
+  backdrop-filter: blur(6px);
+}
+
+/* Bright corner brackets of light. */
+.pp-card::before,
+.pp-card::after {
+  content: '';
+  position: absolute;
+  width: 72px;
+  height: 46px;
+  pointer-events: none;
+  border-color: var(--brass-light);
+  border-style: solid;
+  filter: drop-shadow(0 0 6px rgba(242, 169, 59, 0.8));
+}
+
+.pp-card::before {
+  top: 0;
+  left: 0;
+  border-width: 2px 0 0 2px;
+}
+
+.pp-card::after {
+  right: 0;
+  bottom: 0;
+  border-width: 0 2px 2px 0;
+}
+
+/* A dial of light turning slowly behind the card's top-right corner. */
+.pp-dial {
+  position: absolute;
+  top: -120px;
+  right: -120px;
+  width: 260px;
+  height: 260px;
+  pointer-events: none;
+  /* Behind the text, above the glass (the card's clip-path is its stacking context). */
+  z-index: -1;
+  opacity: 0.55;
+  filter: drop-shadow(0 0 6px rgba(242, 169, 59, 0.7));
+  animation: pp-turn 60s linear infinite;
+}
+
+.pp-dial .pp-dial-inner {
+  transform-origin: 130px 130px;
+  animation: pp-turn 24s linear infinite reverse;
+}
+
+@keyframes pp-turn {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .pp-kicker {
@@ -51,7 +116,8 @@ body {
   font-weight: 700;
   letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: var(--brass);
+  color: var(--amber);
+  text-shadow: 0 0 10px rgba(242, 169, 59, 0.7);
 }
 
 .pp-title {
@@ -61,11 +127,13 @@ body {
   font-size: clamp(48px, 9vw, 84px);
   line-height: 0.95;
   letter-spacing: -0.01em;
+  color: var(--lamp);
+  text-shadow: 0 0 22px rgba(242, 169, 59, 0.45);
 }
 
 .pp-title em {
   font-style: italic;
-  color: var(--brass);
+  color: var(--brass-light);
 }
 
 .pp-lede {
@@ -98,7 +166,8 @@ body {
 .pp-steps svg {
   width: 36px;
   height: 36px;
-  stroke: var(--brass);
+  filter: drop-shadow(0 0 4px rgba(242, 169, 59, 0.6));
+  stroke: var(--brass-light);
   fill: none;
   stroke-width: 1.6;
   stroke-linecap: round;
@@ -110,10 +179,11 @@ body {
   align-items: center;
   gap: 12px;
   padding: 15px 28px;
-  border: 1.5px solid var(--brass);
+  border: 1.5px solid var(--lamp);
   border-radius: 999px;
-  background: var(--brass);
-  color: #1d160c;
+  background: linear-gradient(180deg, var(--brass-light), var(--amber));
+  box-shadow: 0 0 22px rgba(242, 169, 59, 0.55);
+  color: var(--night);
   font: 700 15px/1 var(--sans);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -124,7 +194,7 @@ body {
 }
 
 .pp-enter:hover {
-  background: #e8bb62;
+  box-shadow: 0 0 34px rgba(242, 169, 59, 0.85);
   transform: translateY(-1px);
 }
 
@@ -157,6 +227,17 @@ body {
   color: var(--ink-soft);
 }
 
+.pp-credits {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.pp-credits a {
+  color: var(--brass);
+  text-underline-offset: 2px;
+}
+
 @media (max-width: 720px) {
   .pp-landing {
     align-items: flex-end;
@@ -177,5 +258,10 @@ body {
   .pp-landing,
   .pp-enter {
     transition: none;
+  }
+
+  .pp-dial,
+  .pp-dial .pp-dial-inner {
+    animation: none;
   }
 }
