@@ -47,6 +47,7 @@ import {
   HOLD_SECONDS,
   LEVELS,
   MIRROR_RADIUS,
+  TUTORIAL_COUNT,
   type CrystalDef,
   type LevelDef,
 } from './levels.js';
@@ -109,8 +110,11 @@ const HUD_ACTIONS: HudAction[] = [
   'lvl-6',
   'lvl-7',
   'lvl-8',
+  'lvl-page',
   'lvl-back',
 ];
+const LEVEL_SLOTS = 8;
+const LEVEL_PAGES = Math.ceil(LEVELS.length / LEVEL_SLOTS);
 /** Seconds a palm must stay still to freeze when hold-to-freeze is on. */
 const HOLD_FREEZE_SECONDS = 2;
 const HISTORY = 12;
@@ -131,7 +135,13 @@ const TITLE_LOCAL_Y = 0.34;
 const HIDDEN_Y = -100;
 const INTRO_SECONDS = 0.6;
 const AUTO_ADVANCE_SECONDS = 3.5;
-const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV'];
+const LESSON_NUMERALS = ['i', 'ii', 'iii', 'iv', 'v'];
+
+/** Lessons count i, ii, iii; levels count I, II, III... after them. */
+function levelNumeral(index: number): string {
+  return index < TUTORIAL_COUNT ? LESSON_NUMERALS[index] : ROMAN[index - TUTORIAL_COUNT];
+}
 
 interface PalmState {
   side: Side;
@@ -263,6 +273,8 @@ export class PrismGameSystem extends createSystem({
   private hoverCount = 0;
   private buttonEntities = {} as Record<HudAction, Entity>;
   private hudGroup: HudGroup = 'main';
+  private levelPage = 0;
+  private readonly hiddenButtons = new Set<HudAction>();
   private nextVisible = false;
   private isHarp = false;
   private settings!: Settings;
@@ -501,6 +513,12 @@ export class PrismGameSystem extends createSystem({
       case 'lvl-back':
         this.setHudGroup('main');
         break;
+      case 'lvl-page':
+        this.levelPage = (this.levelPage + 1) % LEVEL_PAGES;
+        this.refreshLevelSlots();
+        this.applyButtonTargets();
+        this.redrawHud();
+        break;
       case 'lvl-1':
       case 'lvl-2':
       case 'lvl-3':
@@ -511,7 +529,7 @@ export class PrismGameSystem extends createSystem({
       case 'lvl-8':
         // Every level is open, so judges and players can jump anywhere.
         this.hudGroup = 'main';
-        this.loadLevel(Number(action.slice(4)) - 1);
+        this.loadLevel(this.levelPage * LEVEL_SLOTS + Number(action.slice(4)) - 1);
         break;
       case 'opt-done':
         this.setHudGroup('main');
@@ -552,14 +570,34 @@ export class PrismGameSystem extends createSystem({
   }
 
   private setHudGroup(group: HudGroup): void {
+    if (group === 'levels' && this.hudGroup !== 'levels') {
+      // Open on the page that holds the current level.
+      this.levelPage = Math.floor(this.levelIndex / LEVEL_SLOTS);
+      this.refreshLevelSlots();
+    }
     this.hudGroup = group;
     this.applyButtonTargets();
     this.redrawHud();
   }
 
   /** Show the active button row and make only visible buttons ray targets. */
+  /** Label the eight level slots for the current page and hide empty ones. */
+  private refreshLevelSlots(): void {
+    for (let n = 0; n < LEVEL_SLOTS; n++) {
+      const action = `lvl-${n + 1}` as HudAction;
+      const index = this.levelPage * LEVEL_SLOTS + n;
+      if (index < LEVELS.length) {
+        this.hiddenButtons.delete(action);
+        this.hud.setButtonLabel(action, levelNumeral(index));
+      } else {
+        this.hiddenButtons.add(action);
+      }
+    }
+    this.hud.setButtonLabel('lvl-page', this.levelPage + 1 < LEVEL_PAGES ? 'More' : 'First');
+  }
+
   private applyButtonTargets(): void {
-    this.hud.showGroup(this.hudGroup, this.nextVisible);
+    this.hud.showGroup(this.hudGroup, this.nextVisible, this.hiddenButtons);
     for (const action of HUD_ACTIONS) {
       const entity = this.buttonEntities[action];
       if (!entity) continue;
@@ -608,8 +646,8 @@ export class PrismGameSystem extends createSystem({
     const solved = this.state === 'clear' || this.state === 'finale';
     if (this.hudGroup === 'levels') {
       return {
-        label: 'Every level is open',
-        title: 'Levels',
+        label: `Every level is open · page ${this.levelPage + 1} of ${LEVEL_PAGES}`,
+        title: this.levelPage === 0 ? 'Lessons and levels' : 'More levels',
         tip: '',
         stars: 0,
         freezesTotal: 0,
@@ -618,12 +656,18 @@ export class PrismGameSystem extends createSystem({
         solved: false,
         hideStars: true,
         hideMeta: true,
-        levelList: LEVELS.map((l, i) => ({
-          numeral: ROMAN[i],
-          title: l.title,
-          stars: this.progress.stars[l.id] ?? 0,
-          current: !this.isDaily && !this.isHarp && i === this.levelIndex,
-        })),
+        levelList: LEVELS.slice(
+          this.levelPage * LEVEL_SLOTS,
+          (this.levelPage + 1) * LEVEL_SLOTS,
+        ).map((l, n) => {
+          const i = this.levelPage * LEVEL_SLOTS + n;
+          return {
+            numeral: levelNumeral(i),
+            title: l.title,
+            stars: this.progress.stars[l.id] ?? 0,
+            current: !this.isDaily && !this.isHarp && i === this.levelIndex,
+          };
+        }),
       };
     }
     if (this.hudGroup === 'options') {
@@ -651,7 +695,9 @@ export class PrismGameSystem extends createSystem({
         ? 'Free play'
         : this.isDaily
           ? `Daily Prism · ${prettyDate(todayKey())}`
-          : `Level ${this.levelIndex + 1} of ${LEVELS.length}`,
+          : this.levelIndex < TUTORIAL_COUNT
+            ? `Lesson ${this.levelIndex + 1} of ${TUTORIAL_COUNT}`
+            : `Level ${this.levelIndex + 1 - TUTORIAL_COUNT} of ${LEVELS.length - TUTORIAL_COUNT}`,
       title: level.title,
       tip: this.tipOverride ?? (solved ? this.solvedLine() : level.tip),
       stars: solved ? this.lastStars : (this.progress.stars[level.id] ?? 0),
@@ -823,7 +869,9 @@ export class PrismGameSystem extends createSystem({
         ? 'Free play'
         : this.isDaily
           ? `Daily Prism · ${prettyDate(todayKey())}`
-          : `Level ${ROMAN[this.levelIndex]}`,
+          : this.levelIndex < TUTORIAL_COUNT
+            ? `Lesson ${levelNumeral(this.levelIndex)}`
+            : `Level ${levelNumeral(this.levelIndex)}`,
       level.title,
     );
     this.redrawHud();
@@ -933,6 +981,16 @@ export class PrismGameSystem extends createSystem({
         points,
         mirrors,
         crystals: Array.from(this.trace.crystalHit.slice(0, this.crystals.length)),
+      })}`,
+    );
+    const info = this.world.renderer.info;
+    console.info(
+      `[PalmPrism] render ${JSON.stringify({
+        assets: ASSETS_ENABLED,
+        drawCalls: info.render.calls,
+        triangles: info.render.triangles,
+        textures: info.memory.textures,
+        geometries: info.memory.geometries,
       })}`,
     );
   }

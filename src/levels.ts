@@ -52,7 +52,51 @@ export interface LevelDef {
   mode?: 'harp';
 }
 
+/** The first levels are short lessons, one idea each, with a ghost hint. */
+export const TUTORIAL_COUNT = 3;
+
 export const LEVELS: LevelDef[] = [
+  // ------------------------------------------------------------- Lessons
+  {
+    id: 'lesson-palm',
+    title: 'The Palm Mirror',
+    tip: 'Hold a palm flat over the lamp: the light bounces off it. Tilt toward the amber crystal.',
+    emitter: { pos: [0, 0.015, 0.02], dir: [0, 1, 0] },
+    crystals: [{ pos: [0.13, 0.16, 0.02], note: 0, kind: 'stay' }],
+    blockers: [],
+    freezes: 0,
+    par: 0,
+    hint: { center: [0, 0.16, 0.02], toward: [0.13, 0.16, 0.02] },
+    solutions: [[[0, 0.16, 0.02], [0.3, 0.16, 0.02]]],
+  },
+  {
+    id: 'lesson-teal',
+    title: 'Teal Sings',
+    tip: 'Teal crystals glow only while light flows through them. Hold the beam steady.',
+    emitter: { pos: [0, 0.015, 0.02], dir: [0, 1, 0] },
+    crystals: [{ pos: [-0.14, 0.2, -0.06], note: 2, kind: 'pulse' }],
+    blockers: [],
+    freezes: 0,
+    par: 0,
+    hint: { center: [0, 0.2, 0.02], toward: [-0.14, 0.2, -0.06] },
+    solutions: [[[0, 0.2, 0.02], [-0.28, 0.2, -0.14]]],
+  },
+  {
+    id: 'lesson-freeze',
+    title: 'Leave a Mirror',
+    tip: 'Pinch to freeze your palm as a brass mirror, then use that hand again.',
+    emitter: { pos: [0, 0.015, 0.04], dir: [0, 1, 0] },
+    crystals: [
+      { pos: [-0.09, 0.2, 0.04], note: 1, kind: 'pulse' },
+      { pos: [-0.18, 0.2, -0.13], note: 4, kind: 'pulse' },
+    ],
+    blockers: [],
+    freezes: 1,
+    par: 1,
+    hint: { center: [0, 0.2, 0.04], toward: [-0.18, 0.2, 0.04] },
+    solutions: [[[0, 0.2, 0.04], [-0.18, 0.2, 0.04], [-0.18, 0.2, -0.4]]],
+  },
+  // -------------------------------------------------------------- Levels
   {
     id: 'first-light',
     title: 'First Light',
@@ -188,6 +232,87 @@ export const LEVELS: LevelDef[] = [
         [-0.18, 0.26, 0.12],
         [0.12, 0.12, 0.12],
         [0.12, 0.42, -0.18],
+      ],
+    ],
+  },
+  {
+    id: 'zigzag',
+    title: 'Zigzag',
+    tip: 'Across, up and back. The last note only sings while the whole path holds.',
+    emitter: { pos: [0.2, 0.015, 0.12], dir: [0, 1, 0] },
+    crystals: [
+      { pos: [0, 0.14, 0.12], note: 0, kind: 'stay' },
+      { pos: [-0.2, 0.22, -0.015], note: 3, kind: 'stay' },
+      { pos: [0.1, 0.3, -0.15], note: 6, kind: 'pulse' },
+    ],
+    blockers: [],
+    freezes: 1,
+    par: 1,
+    solutions: [
+      [
+        [0.2, 0.14, 0.12],
+        [-0.2, 0.14, 0.12],
+        [-0.2, 0.3, -0.15],
+        [0.4, 0.3, -0.15],
+      ],
+    ],
+  },
+  {
+    id: 'the-gate',
+    title: 'The Gate',
+    tip: 'A wall stands in the lamp’s way. Lead the light around the gate.',
+    emitter: { pos: [-0.22, 0.1, -0.1], dir: [1, 0, 0] },
+    crystals: [
+      { pos: [0.08, 0.1, 0.12], note: 2, kind: 'pulse' },
+      { pos: [0.22, 0.1, -0.1], note: 5, kind: 'pulse' },
+    ],
+    blockers: [{ min: [-0.02, 0, -0.2], max: [0.02, 0.3, 0] }],
+    freezes: 1,
+    par: 1,
+    solutions: [
+      [
+        [-0.1, 0.1, -0.1],
+        [-0.1, 0.1, 0.12],
+        [0.22, 0.1, 0.12],
+        [0.22, 0.1, -0.4],
+      ],
+    ],
+  },
+  {
+    id: 'high-wire',
+    title: 'High Wire',
+    tip: 'Reach high, then bring the light down toward you.',
+    emitter: { pos: [0, 0.015, -0.15], dir: [0, 1, 0] },
+    crystals: [
+      { pos: [0, 0.38, 0], note: 4, kind: 'pulse' },
+      { pos: [0, 0.12, 0.15], note: 1, kind: 'pulse' },
+    ],
+    blockers: [],
+    freezes: 1,
+    par: 0,
+    solutions: [[[0, 0.38, -0.15], [0, 0.38, 0.15], [0, -0.3, 0.15]]],
+  },
+  {
+    id: 'north-star',
+    title: 'North Star',
+    tip: 'Four bounces, four notes, all at once. Freeze as you go.',
+    emitter: { pos: [-0.18, 0.015, 0.12], dir: [0, 1, 0] },
+    crystals: [
+      { pos: [0, 0.2, 0.12], note: 0, kind: 'pulse' },
+      { pos: [0.18, 0.2, -0.02], note: 2, kind: 'pulse' },
+      { pos: [0, 0.26, -0.16], note: 4, kind: 'pulse' },
+      { pos: [-0.18, 0.32, 0.1], note: 7, kind: 'pulse' },
+    ],
+    blockers: [],
+    freezes: 2,
+    par: 2,
+    solutions: [
+      [
+        [-0.18, 0.2, 0.12],
+        [0.18, 0.2, 0.12],
+        [0.18, 0.2, -0.16],
+        [-0.18, 0.32, -0.16],
+        [-0.18, 0.32, 0.4],
       ],
     ],
   },

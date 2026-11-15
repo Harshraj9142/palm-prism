@@ -39,6 +39,7 @@ export type HudAction =
   | 'lvl-6'
   | 'lvl-7'
   | 'lvl-8'
+  | 'lvl-page'
   | 'lvl-back';
 
 export type HudGroup = 'main' | 'options' | 'levels';
@@ -230,16 +231,17 @@ const BUTTON_LAYOUT: Record<
   'opt-lower': { x: 676, w: 100, label: 'Lower', icon: 'none', group: 'options' },
   recenter: { x: 789, w: 110, label: 'Center', icon: 'none', group: 'options' },
   'opt-done': { x: 912, w: 120, label: 'Done', icon: 'none', group: 'options' },
-  // Level picker row.
-  'lvl-1': { x: 97, w: 90, label: 'I', icon: 'none', group: 'levels' },
-  'lvl-2': { x: 197, w: 90, label: 'II', icon: 'none', group: 'levels' },
-  'lvl-3': { x: 297, w: 90, label: 'III', icon: 'none', group: 'levels' },
-  'lvl-4': { x: 397, w: 90, label: 'IV', icon: 'none', group: 'levels' },
-  'lvl-5': { x: 497, w: 90, label: 'V', icon: 'none', group: 'levels' },
-  'lvl-6': { x: 597, w: 90, label: 'VI', icon: 'none', group: 'levels' },
-  'lvl-7': { x: 697, w: 90, label: 'VII', icon: 'none', group: 'levels' },
-  'lvl-8': { x: 797, w: 90, label: 'VIII', icon: 'none', group: 'levels' },
-  'lvl-back': { x: 912, w: 120, label: 'Back', icon: 'none', group: 'levels' },
+  // Level picker row: eight slots for the current page, then page and back.
+  'lvl-1': { x: 92, w: 80, label: 'I', icon: 'none', group: 'levels' },
+  'lvl-2': { x: 180, w: 80, label: 'II', icon: 'none', group: 'levels' },
+  'lvl-3': { x: 268, w: 80, label: 'III', icon: 'none', group: 'levels' },
+  'lvl-4': { x: 356, w: 80, label: 'IV', icon: 'none', group: 'levels' },
+  'lvl-5': { x: 444, w: 80, label: 'V', icon: 'none', group: 'levels' },
+  'lvl-6': { x: 532, w: 80, label: 'VI', icon: 'none', group: 'levels' },
+  'lvl-7': { x: 620, w: 80, label: 'VII', icon: 'none', group: 'levels' },
+  'lvl-8': { x: 708, w: 80, label: 'VIII', icon: 'none', group: 'levels' },
+  'lvl-page': { x: 820, w: 120, label: 'More', icon: 'none', group: 'levels' },
+  'lvl-back': { x: 932, w: 90, label: 'Back', icon: 'none', group: 'levels' },
 };
 const BUTTON_Y = 474;
 const BUTTON_Z = 0.004;
@@ -391,11 +393,15 @@ export class Hud {
     b.material.needsUpdate = true;
   }
 
-  /** Show one row of buttons. Returns nothing; the caller toggles ray targets. */
-  showGroup(group: HudGroup, nextVisible: boolean): void {
+  /**
+   * Show one row of buttons. `hidden` drops individual buttons from the row
+   * (empty level slots on the last page). The caller toggles ray targets.
+   */
+  showGroup(group: HudGroup, nextVisible: boolean, hidden?: ReadonlySet<HudAction>): void {
     for (const action of Object.keys(this.buttons) as HudAction[]) {
       const b = this.buttons[action];
-      const shown = b.group === group && (action !== 'next' || nextVisible);
+      const shown =
+        b.group === group && (action !== 'next' || nextVisible) && !hidden?.has(action);
       b.mesh.visible = shown;
       // Hidden buttons share space with the other row. Park them well behind
       // the card so a ray can never land on one instead of a visible button.

@@ -4,9 +4,14 @@
  * storage simply start fresh instead of breaking the game.
  */
 
+import { TUTORIAL_COUNT } from './levels.js';
+
 const KEY = 'palm-prism.v1';
+/** 2: three lessons were added before level I, so saved indexes shift by three. */
+const FORMAT = 2;
 
 export interface Progress {
+  format?: number;
   unlocked: number;
   stars: Record<string, number>;
   lastDay: string;
@@ -29,13 +34,17 @@ function yesterday(): string {
 }
 
 export function loadProgress(): Progress {
-  const fresh: Progress = { unlocked: 0, stars: {}, lastDay: '', streak: 0 };
+  const fresh: Progress = { format: FORMAT, unlocked: 0, stars: {}, lastDay: '', streak: 0 };
   try {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return fresh;
     const parsed = JSON.parse(raw) as Partial<Progress>;
+    let unlocked = Number.isFinite(parsed.unlocked) ? Number(parsed.unlocked) : 0;
+    // Saved before the lessons existed: keep returning players on their level.
+    if (parsed.format !== FORMAT && unlocked > 0) unlocked += TUTORIAL_COUNT;
     return {
-      unlocked: Number.isFinite(parsed.unlocked) ? Number(parsed.unlocked) : 0,
+      format: FORMAT,
+      unlocked,
       stars: parsed.stars && typeof parsed.stars === 'object' ? parsed.stars : {},
       lastDay: typeof parsed.lastDay === 'string' ? parsed.lastDay : '',
       streak: Number.isFinite(parsed.streak) ? Number(parsed.streak) : 0,
@@ -77,6 +86,7 @@ export function recordClear(
   let streak = p.streak;
   if (p.lastDay !== day) streak = p.lastDay === yesterday() ? streak + 1 : 1;
   const next: Progress = {
+    format: FORMAT,
     unlocked: Math.min(Math.max(p.unlocked, levelIndex + 1), levelCount - 1),
     stars: { ...p.stars, [levelId]: Math.max(p.stars[levelId] ?? 0, stars) },
     lastDay: day,
