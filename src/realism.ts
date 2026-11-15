@@ -1,6 +1,7 @@
 /**
  * Realism layer for Palm Prism: everything that makes the scene read as real
- * material under real light, generated in code (nothing is downloaded).
+ * material under real light, generated in code. When downloaded assets are on
+ * (see asset-props.ts), the moon_lab HDRI replaces the painted reflections.
  *
  * - A night-room environment map (warm lamplight, cool moonlight) so brass,
  *   glass and stone show believable reflections.

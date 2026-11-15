@@ -108,7 +108,7 @@ const crystalGeometry: Partial<Record<CrystalKind, BufferGeometry>> = {};
 let decorPrototype: Mesh[] | null = null;
 
 /** Copy a (possibly quantized) primitive into a plain float geometry in world units. */
-function bakeGeometry(mesh: Mesh, scale: number): BufferGeometry {
+function bakeGeometry(mesh: Mesh, scale: number, girth = 1): BufferGeometry {
   mesh.updateWorldMatrix(true, false);
   const src = mesh.geometry.getAttribute('position');
   const positions = new Float32Array(src.count * 3);
@@ -122,7 +122,7 @@ function bakeGeometry(mesh: Mesh, scale: number): BufferGeometry {
   const index = mesh.geometry.getIndex();
   if (index) geometry.setIndex(Array.from(index.array as ArrayLike<number>));
   geometry.applyMatrix4(mesh.matrixWorld);
-  geometry.scale(scale, scale, scale);
+  geometry.scale(scale * girth, scale, scale * girth);
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
   return geometry;
@@ -147,7 +147,7 @@ async function loadCrystals(renderer: WebGLRenderer): Promise<void> {
   const gltf = await getGLTFLoader(renderer).loadAsync(`${BASE}crystals/crystals.glb`);
   const amber = findMesh(gltf.scene, 'AmberShard')[0];
   const teal = findMesh(gltf.scene, 'TealCluster')[0];
-  if (amber) crystalGeometry.stay = bakeGeometry(amber, CRYSTAL_RADIUS * 1.3);
+  if (amber) crystalGeometry.stay = bakeGeometry(amber, CRYSTAL_RADIUS * 1.15, 1.9);
   if (teal) crystalGeometry.pulse = bakeGeometry(teal, CRYSTAL_RADIUS * 1.2);
   const decor = findMesh(gltf.scene, 'DecorCluster');
   if (decor.length) decorPrototype = decor;
@@ -161,11 +161,13 @@ export function getCrystalGeometry(kind: CrystalKind): BufferGeometry | null {
 // ------------------------------------------------------------------- Decor
 
 /** Where the quartz decor stands, in board-local metres (floor height is set each frame). */
+// Every prop stays over 2 m from the board centre: the beam ends at most
+// MAX_SEGMENT (1.4 m) past a mirror, and mirrors stay within ~0.3 m of the board.
 const DECOR_SPOTS: [number, number, number, number][] = [
   // x, z, height, yaw
-  [-2.6, -2.4, 0.42, 0.4],
-  [2.9, -1.7, 0.34, 2.1],
-  [-3.1, 0.9, 0.3, 4.0],
+  [-2.4, -2.6, 0.42, 0.4],
+  [2.8, -2.9, 0.34, 2.1],
+  [-3.2, -0.6, 0.3, 4.0],
 ];
 
 function createDecor(): Group {
@@ -174,9 +176,9 @@ function createDecor(): Group {
   if (!decorPrototype) return group;
   const env = getEnvMap();
   const quartz = new MeshStandardMaterial({
-    color: '#3a4651',
-    emissive: new Color('#3fc7c0'),
-    emissiveIntensity: 0.05,
+    color: '#4b4350',
+    emissive: new Color('#000000'),
+    emissiveIntensity: 0,
     metalness: 0,
     roughness: 0.15,
     envMap: env,
@@ -451,8 +453,10 @@ export function loadAssetProps(world: World, hooks: AssetHooks): void {
   Promise.all([env, loadPlanetMaps()])
     .then(([, maps]) => {
       const orrery = createOrrery(maps);
-      // Right of the board and behind it: beyond arm's reach, away from the HUD.
-      orrery.group.position.set(1.05, 0, -0.85);
+      // Right of the board and well behind it: beyond arm's reach, away from
+      // the HUD, and more than 1.9 m from the board centre so no beam reaches it.
+      orrery.group.position.set(1.85, 0, -1.65);
+      orrery.group.scale.setScalar(1.25);
       hooks.onProp(orrery.group, orrery.update);
     })
     .catch((e) => warn('orrery', e));

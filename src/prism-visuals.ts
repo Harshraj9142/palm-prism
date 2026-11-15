@@ -3,7 +3,8 @@
  * on a brass stem, warm lamplight beams with drifting dust, amber and
  * aquamarine crystals, glass-and-brass mirrors, and a real-feeling night sky.
  *
- * Everything is procedural (no downloads) and cheap: unlit glow sprites
+ * Everything here is procedural and cheap (downloaded crystal meshes, when
+ * loaded, come from asset-props.ts): unlit glow sprites
  * instead of post-processing, so Quest stays at frame rate.
  */
 import {

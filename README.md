@@ -72,6 +72,7 @@ Useful for testing and for recording the demo video.
 | `src/daily.ts` | Daily Prism generator (seeded by date, self-validating) |
 | `src/realism.ts` | Generated night-room reflections, brushed brass, engraved slate, glass and obsidian materials, light spill, turned pedestal, flagstone floor, Milky Way and moon |
 | `src/prism-visuals.ts` | Night-observatory look: brass astrolabe board, lamplight beam with dust, crystals, mirrors, sky with your constellation, floor |
+| `src/asset-props.ts` | Licensed downloaded assets layered on top: HDRI reflections, crystal meshes, orrery planets, quartz decor, self-hosted hands. Loads in the background; `?assets=0` turns it all off. See `CREDITS.md` |
 | `src/audio.ts` | Generated sounds (no audio files) |
 | `src/progress.ts` | Unlocks, stars and daily streak in localStorage |
 | `src/settings.ts` | Accessibility options in localStorage |
@@ -79,6 +80,14 @@ Useful for testing and for recording the demo video.
 | `src/landing.ts`, `src/landing.css` | Browser landing page over the live 3D scene |
 | `src/prism-button.ts` | ECS component for pressable HUD buttons |
 | `scripts/verify-levels.ts` | Proves every level, and a year of daily puzzles, is solvable with the real tracer |
+
+## Assets
+
+The board, lamp, beam, mirrors, sky, floor, HUD and sounds are made in code.
+A few licensed assets (CC0, CC BY 4.0, MIT) are layered on top for realism:
+see `CREDITS.md`. They live optimised in `public/assets/`; raw downloads go in
+the gitignored `assets-src/`. Open the game with `?assets=0` to see the
+code-only look.
 
 ## Checks
 
