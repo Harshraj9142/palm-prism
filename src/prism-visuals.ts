@@ -39,6 +39,7 @@ import {
   TorusGeometry,
   Vector3,
 } from '@iwsdk/core';
+import { getCrystalGeometry } from './asset-props.js';
 import { MAX_BOUNCES } from './beam.js';
 import {
   brassMaterial,
@@ -363,7 +364,8 @@ export function createCrystal(kind: CrystalKind, note: number): CrystalVisual {
     () => new DodecahedronGeometry(r * 0.9, 0),
     () => new TetrahedronGeometry(r * 1.15, 0),
   ];
-  const geometry = shapes[note % shapes.length]();
+  // Downloaded mesh when ready (shard for amber, cluster for teal), else procedural.
+  const geometry = getCrystalGeometry(kind) ?? shapes[note % shapes.length]();
   const color = kind === 'stay' ? COLORS.gold : COLORS.blue;
   const material = glassMaterial(kind === 'stay' ? COLORS.goldDim : COLORS.blueDim, color);
   const mesh = new Mesh(geometry, material);
@@ -377,6 +379,14 @@ export function createCrystal(kind: CrystalKind, note: number): CrystalVisual {
   const halo = createGlowSprite(color, 0.12, 0.12);
   group.add(halo);
   return { group, mesh, material, halo };
+}
+
+/** Swap a live crystal onto the downloaded mesh once it has loaded (visual only). */
+export function upgradeCrystal(visual: CrystalVisual, kind: CrystalKind): void {
+  const geometry = getCrystalGeometry(kind);
+  if (!geometry) return;
+  visual.mesh.geometry.dispose();
+  visual.mesh.geometry = geometry;
 }
 
 export function createBlocker(

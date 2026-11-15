@@ -66,6 +66,8 @@ export interface HudState {
   hideMeta?: boolean;
   /** Level picker: a two-column list of levels with their best stars. */
   levelList?: LevelEntry[];
+  /** Small print above the buttons (options page credits). */
+  footnote?: string;
 }
 
 const INK = '#2a2219';
@@ -449,8 +451,16 @@ export class Hud {
     ctx.fillStyle = INK_SOFT;
     ctx.font = `italic 31px ${SERIF}`;
     wrap(ctx, state.tip, right - left - (state.solved ? 170 : 0))
-      .slice(0, state.hideMeta ? 4 : 2)
+      .slice(0, state.hideMeta ? (state.footnote ? 3 : 4) : 2)
       .forEach((line, i) => ctx.fillText(line, left, 218 + i * 40));
+
+    if (state.footnote) {
+      ctx.fillStyle = INK_SOFT;
+      ctx.font = `20px ${SANS}`;
+      wrap(ctx, state.footnote, right - left)
+        .slice(0, 2)
+        .forEach((line, i) => ctx.fillText(line, left, 356 + i * 26));
+    }
 
     if (!state.hideMeta) {
       ctx.strokeStyle = 'rgba(167,121,47,0.45)';

@@ -68,11 +68,13 @@ import {
   DustMotes,
   orientAlong,
   placeMirror,
+  upgradeCrystal,
   type Board,
   type CrystalVisual,
   type MirrorVisual,
   type Sky,
 } from './prism-visuals.js';
+import { ASSETS_ENABLED, loadAssetProps } from './asset-props.js';
 import { loadSettings, saveSettings, type Settings } from './settings.js';
 import {
   currentStreak,
@@ -196,6 +198,9 @@ export class PrismGameSystem extends createSystem({
 }) {
   private boardParts!: Board;
   private board!: Group;
+  /** Downloaded props, board-relative, standing on the floor (see asset-props.ts). */
+  private props!: Group;
+  private propUpdates: ((dt: number) => void)[] = [];
   private rune!: MeshBasicMaterial;
   private levelGroup!: Group;
   private emitter!: Group;
@@ -358,6 +363,20 @@ export class PrismGameSystem extends createSystem({
 
     this.setupHud();
     this.loadLevel(Math.min(this.progress.unlocked, LEVELS.length - 1));
+
+    // Downloaded assets load in the background (skipped with ?assets=0).
+    this.props = new Group();
+    this.props.name = 'AssetProps';
+    this.board.add(this.props);
+    loadAssetProps(this.world, {
+      onCrystals: () => {
+        for (const c of this.crystals) upgradeCrystal(c.visual, c.def.kind);
+      },
+      onProp: (prop, update) => {
+        this.props.add(prop);
+        if (update) this.propUpdates.push(update);
+      },
+    });
 
     this.cleanupFuncs.push(
       this.world.visibilityState.subscribe((visibility) => {
@@ -614,6 +633,10 @@ export class PrismGameSystem extends createSystem({
         tip:
           'Hold to freeze: keep a palm still for two seconds instead of pinching. ' +
           'One hand: every level gets an extra freeze. Raise or lower moves the board.',
+        footnote: ASSETS_ENABLED
+          ? 'Credits: crystals by Aredon (CC0) · hands, WebXR Input Profiles (MIT) · moon_lab HDRI by ' +
+            'Greg Zaal, Poly Haven (CC0) · planet maps, Solar System Scope (CC BY 4.0). Full list: CREDITS.md'
+          : undefined,
         stars: 0,
         freezesTotal: 0,
         freezesLeft: 0,
@@ -1087,6 +1110,9 @@ export class PrismGameSystem extends createSystem({
     this.board.updateWorldMatrix(true, false);
     this.boardInv.copy(this.board.matrixWorld).invert();
     this.floorBox.maxY = -this.board.position.y;
+    // Props stand on the floor wherever the board is placed.
+    this.props.position.y = -this.board.position.y;
+    for (let i = 0; i < this.propUpdates.length; i++) this.propUpdates[i](dt);
 
     for (const side of SIDES) this.updatePalm(this.palms[side], dt);
 

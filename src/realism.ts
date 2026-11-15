@@ -16,7 +16,9 @@ import {
   EquirectangularReflectionMapping,
   Group,
   LatheGeometry,
+  type Material,
   Mesh,
+  type Object3D,
   MeshBasicMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
@@ -113,6 +115,34 @@ export function getEnvMap(): Texture | null {
   return envMap;
 }
 
+/** Multiplier on every reflection strength; 1 for the painted room. */
+let envScale = 1;
+
+/**
+ * Replace the painted night room with a downloaded environment (see
+ * asset-props.ts). Every material already reflecting the painted room is
+ * switched over, with its strength scaled; materials built later use it too.
+ * The sky and background are untouched.
+ */
+export function useAssetEnvironment(texture: Texture, scale: number, root: Object3D): void {
+  const painted = envMap;
+  envMap = texture;
+  envScale = scale;
+  root.traverse((obj) => {
+    const mat = (obj as Mesh).material as
+      | (Material & { envMap?: Texture | null; envMapIntensity?: number })
+      | Material[]
+      | undefined;
+    for (const m of Array.isArray(mat) ? mat : mat ? [mat] : []) {
+      const pbr = m as Material & { envMap?: Texture | null; envMapIntensity?: number };
+      if (pbr.envMap !== painted || !painted) continue;
+      pbr.envMap = texture;
+      pbr.envMapIntensity = (pbr.envMapIntensity ?? 1) * scale;
+      pbr.needsUpdate = true;
+    }
+  });
+}
+
 // ------------------------------------------------------------- Materials
 
 let brushedRoughness: CanvasTexture | null = null;
@@ -156,7 +186,7 @@ export function brassMaterial(tone: 'bright' | 'dark' = 'bright'): MeshStandardM
     roughness: tone === 'bright' ? 0.38 : 0.5,
     roughnessMap: getBrushedRoughness(),
     envMap,
-    envMapIntensity: tone === 'bright' ? 1.35 : 1,
+    envMapIntensity: (tone === 'bright' ? 1.35 : 1) * envScale,
   });
 }
 
@@ -173,7 +203,7 @@ export function glassMaterial(tint: Color, glow: Color): MeshPhysicalMaterial {
     ior: 1.6,
     specularIntensity: 1,
     envMap,
-    envMapIntensity: 1.7,
+    envMapIntensity: 1.7 * envScale,
     flatShading: true,
   });
 }
@@ -187,7 +217,7 @@ export function obsidianMaterial(): MeshPhysicalMaterial {
     clearcoat: 1,
     clearcoatRoughness: 0.08,
     envMap,
-    envMapIntensity: 1.2,
+    envMapIntensity: 1.2 * envScale,
   });
 }
 
