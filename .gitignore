@@ -43,3 +43,6 @@ pids/
 .cursor/mcp.json
 .vscode/mcp.json
 .codex/config.toml
+
+# Raw third-party asset downloads (optimised copies live in public/assets/)
+assets-src/
