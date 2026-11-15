@@ -27,6 +27,21 @@ export interface BlockerDef {
   max: Vec3;
 }
 
+/**
+ * One step of a lesson's coach: a short instruction, where its marker points
+ * (board-local), and what the player must do to move on.
+ *  - `palm`: a palm is reflecting the lamp's beam.
+ *  - `hit`: the beam passes through crystal `crystal` right now.
+ *  - `freeze`: a mirror has been frozen.
+ *  - `clear`: stays until the level is solved (the last step).
+ */
+export interface CoachStep {
+  text: string;
+  marker?: Vec3;
+  until: 'palm' | 'hit' | 'freeze' | 'clear';
+  crystal?: number;
+}
+
 export interface LevelDef {
   id: string;
   title: string;
@@ -41,6 +56,8 @@ export interface LevelDef {
   par: number;
   /** Ghost mirror shown until the first crystal lights (onboarding). */
   hint?: { center: Vec3; toward: Vec3 };
+  /** Lessons only: step-by-step instructions with a marker (see CoachStep). */
+  coach?: CoachStep[];
   /**
    * Known solutions, used only by scripts/verify-levels.ts. Each entry is a
    * beam path: mirror centres in order, then a far point the last bounce aims
@@ -67,6 +84,20 @@ export const LEVELS: LevelDef[] = [
     freezes: 0,
     par: 0,
     hint: { center: [0, 0.16, 0.02], toward: [0.13, 0.16, 0.02] },
+    coach: [
+      {
+        text: 'Raise a hand. Hold your palm flat, a hand above the glowing lamp.',
+        marker: [0, 0.16, 0.02],
+        until: 'palm',
+      },
+      {
+        text: 'The light bounces off your palm. Tilt it slowly toward the amber crystal.',
+        marker: [0.13, 0.16, 0.02],
+        until: 'hit',
+        crystal: 0,
+      },
+      { text: 'Keep it there a moment. Amber crystals stay lit once charged.', until: 'clear' },
+    ],
     solutions: [[[0, 0.16, 0.02], [0.3, 0.16, 0.02]]],
   },
   {
@@ -79,6 +110,20 @@ export const LEVELS: LevelDef[] = [
     freezes: 0,
     par: 0,
     hint: { center: [0, 0.2, 0.02], toward: [-0.14, 0.2, -0.06] },
+    coach: [
+      {
+        text: 'Palm over the lamp again. Either hand works.',
+        marker: [0, 0.2, 0.02],
+        until: 'palm',
+      },
+      {
+        text: 'Aim at the teal crystal. Teal only glows while light flows through it.',
+        marker: [-0.14, 0.2, -0.06],
+        until: 'hit',
+        crystal: 0,
+      },
+      { text: 'Hold steady until it sings.', until: 'clear' },
+    ],
     solutions: [[[0, 0.2, 0.02], [-0.28, 0.2, -0.14]]],
   },
   {
@@ -94,6 +139,24 @@ export const LEVELS: LevelDef[] = [
     freezes: 1,
     par: 1,
     hint: { center: [0, 0.2, 0.04], toward: [-0.18, 0.2, 0.04] },
+    coach: [
+      {
+        text: 'Palm over the lamp. Tilt left so the light runs through the near teal crystal.',
+        marker: [-0.09, 0.2, 0.04],
+        until: 'hit',
+        crystal: 0,
+      },
+      {
+        text: 'Now pinch thumb and finger. Your palm freezes into a brass mirror.',
+        marker: [0, 0.2, 0.04],
+        until: 'freeze',
+      },
+      {
+        text: 'Your hand is free. Catch the light at the left and send it to the far crystal.',
+        marker: [-0.18, 0.2, 0.04],
+        until: 'clear',
+      },
+    ],
     solutions: [[[0, 0.2, 0.04], [-0.18, 0.2, 0.04], [-0.18, 0.2, -0.4]]],
   },
   // -------------------------------------------------------------- Levels

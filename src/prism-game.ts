@@ -76,6 +76,7 @@ import {
   type Sky,
 } from './prism-visuals.js';
 import { ASSETS_ENABLED, loadAssetProps } from './asset-props.js';
+import { Coach } from './coach.js';
 import { loadSettings, saveSettings, type Settings } from './settings.js';
 import {
   currentStreak,
@@ -215,6 +216,10 @@ export class PrismGameSystem extends createSystem({
   private props!: Group;
   private propUpdates: ((dt: number) => void)[] = [];
   private boardDial!: Object3D;
+  /** Step-by-step instructions in the lessons. */
+  private coach!: Coach;
+  /** Seconds the current coach step's goal has been met (debounces flicker). */
+  private coachMet = 0;
   private rune!: MeshBasicMaterial;
   private levelGroup!: Group;
   private emitter!: Group;
@@ -376,6 +381,9 @@ export class PrismGameSystem extends createSystem({
     this.titleCard.mesh.position.set(0, TITLE_LOCAL_Y, TITLE_LOCAL_Z);
     this.titleCard.baseY = TITLE_LOCAL_Y;
     this.board.add(this.titleCard.mesh);
+
+    this.coach = new Coach();
+    this.board.add(this.coach.group);
 
     // A dial of light turning slowly around the board's brass rim.
     this.boardDial = createBoardDial(0.64);
@@ -813,6 +821,9 @@ export class PrismGameSystem extends createSystem({
     });
     this.boxes = [this.boardSlab, this.floorBox, ...levelBoxes];
 
+    this.coach.start(level.coach);
+    this.coachMet = 0;
+
     const e = level.emitter;
     this.emitter.position.set(e.pos[0], e.pos[1], e.pos[2]);
     const pool = this.boardParts.lampPool;
@@ -1241,6 +1252,7 @@ export class PrismGameSystem extends createSystem({
     this.bursts.update(dt);
     this.titleCard.update(dt);
     this.hud.update(dt);
+    this.updateCoach(dt);
     this.boardDial.rotation.z += dt * 0.04;
     if (this.clearFlash > 0) {
       this.clearFlash = Math.max(0, this.clearFlash - dt * 0.6);
@@ -1358,6 +1370,39 @@ export class PrismGameSystem extends createSystem({
     this.hint.fill.opacity = 0.06 + 0.1 * glow;
     this.hint.ring.opacity = 0.3 + 0.5 * glow;
     this.ghostLineMat.opacity = cycle > 0.55 ? Math.min(1, (cycle - 0.55) / 0.15) * 0.8 : 0;
+  }
+
+  /**
+   * Lesson coach: show the current step while playing in VR, and move on once
+   * its goal has held for a moment (a palm in the beam, a crystal hit, a freeze).
+   */
+  private updateCoach(dt: number): void {
+    const step = this.coach.step;
+    const visible = !!step && this.immersive && this.state === 'play';
+    this.player.head.getWorldPosition(this.vC);
+    this.board.worldToLocal(this.vC);
+    this.coach.update(dt, visible, this.vC.x, this.vC.z);
+    if (!step || !visible) return;
+    let met = false;
+    switch (step.until) {
+      case 'palm':
+        met = this.trace.mirrorHit[0] === 1 || this.trace.mirrorHit[1] === 1;
+        break;
+      case 'hit':
+        met = this.trace.crystalHit[step.crystal ?? 0] === 1;
+        break;
+      case 'freeze':
+        met = this.freezesUsed > 0;
+        break;
+      case 'clear':
+        met = false;
+        break;
+    }
+    this.coachMet = met ? this.coachMet + dt : 0;
+    if (this.coachMet >= 0.35) {
+      this.coachMet = 0;
+      if (this.coach.advance()) prismAudio.bell(4, 0.08, 0, 2);
+    }
   }
 
   /** Hold-to-freeze: a palm held still over the board for two seconds freezes. */
